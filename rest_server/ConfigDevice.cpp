@@ -3,7 +3,12 @@
 
 ConfigDevice::ConfigDevice(std::shared_ptr<AsyncWebServer> server) {
   server->on(ConfigDevice_PATH, HTTP_GET, std::bind(&ConfigDevice::get, this, std::placeholders::_1));
-  server->on(ConfigDevice_PATH, HTTP_POST, std::bind(&ConfigDevice::post, this, std::placeholders::_1));
+  server->on(ConfigDevice_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
+    esphome::json::parse_json(request->post_query_, [this, request](JsonObject root) {
+      this->post(request);
+      return true;
+    });
+  });
 }
 
 void ConfigDevice::get(AsyncWebServerRequest* request) {

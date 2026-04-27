@@ -28,6 +28,7 @@ CONFIG_SCHEMA = time.TIME_SCHEMA.extend(
             cv.GenerateID(): cv.use_id(DS1307mComponent),
         }
     ),
+    synchronous=True,
 )
 async def ds1307m_write_time_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
@@ -43,6 +44,7 @@ async def ds1307m_write_time_to_code(config, action_id, template_arg, args):
             cv.GenerateID(): cv.use_id(DS1307mComponent),
         }
     ),
+    synchronous=True,
 )
 async def ds1307m_read_time_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)

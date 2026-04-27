@@ -7,10 +7,13 @@ AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> ser
   // jwt->allocateJWTMemory();
   server->on(VERIFY_AUTHORIZATION_PATH, HTTP_GET, std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
-  AsyncCallbackJsonWebHandler *signinHandler = new AsyncCallbackJsonWebHandler(SIGN_IN_PATH, std::bind(&AuthenticationService::signIn, this, std::placeholders::_1, std::placeholders::_2));
-  signinHandler->setMethod(HTTP_POST);
-  signinHandler->setMaxContentLength(MAX_AUTHENTICATION_SIZE);
-  server->addHandler(signinHandler);
+  server->on(SIGN_IN_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
+    esphome::json::parse_json(request->post_query_, [this, request](JsonObject root) {
+      JsonVariant json = root;
+      this->signIn(request, json);
+      return true;
+    });
+  });
 }
 
 /**
@@ -40,18 +43,10 @@ void AuthenticationService::signIn(AsyncWebServerRequest *request, JsonVariant &
     // Authentication authentication = Authentication(username);
     if (authentication.authenticated)
     {
-      // User *user = authentication.user;
-      AsyncJsonResponse *response = new AsyncJsonResponse(false, MAX_AUTHENTICATION_SIZE);
-      JsonObject jsonObject = response->getRoot();
-      // uint32_t duration = millis();
-      // jsonObject["access_token"] = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImdvZ2Fub3ZpY0BnbWFpbC5jb20iLCJyb2xlIjoiY3VzdG9tZXIifQ.s69PT-wD3ur0rwFMsD-RgFp_D0EF6mrfiw59fbhhpz0";
-      jsonObject["access_token"] = generateJWT(username);
-      // duration = millis() - duration;
-      // jsonObject["duration"] = duration;
-      // jsonObject["access_token"] = "xxxxxxxx";
-      // jsonObject["role"] = user->role;
-      response->setLength();
-      request->send(response);
+      std::string data = esphome::json::build_json([this, username](JsonObject jsonObject) {
+        jsonObject["access_token"] = generateJWT(username);
+      });
+      request->send(200, "application/json", data.c_str());
       return;
     }
   }
@@ -84,12 +79,7 @@ String AuthenticationService::generateJWT(String username)
 
   // return _jwtHandler->buildJWT(payload);
 
-  String body;
-  serializeJson(payload, body);
-  // jwt->encodeJWT(&body[0]);
-  // char *bodyBuf = (char*)body.c_str();
-
-  return jwt->encodeJWT(body);
+  return jwt->buildJWT(payload);
 
   // String bodyEncoded = encode(body.c_str(), body.length());
 

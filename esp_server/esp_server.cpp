@@ -55,7 +55,7 @@ namespace esphome
 #endif
     }
 
-    bool EspServer::canHandle(AsyncWebServerRequest *request)
+    bool EspServer::canHandle(AsyncWebServerRequest *request) const
     {
 
       if (request->url() == "/esp")

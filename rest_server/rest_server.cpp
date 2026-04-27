@@ -4,7 +4,7 @@
 // #include "esphome/core/application.h"
 #include "WWWData.h"
 
-// #include "stm32otaHandler.h"
+#include "stm32updater/stm32otaHandler.h"
 
 #include "ArduinoJsonJWT.h"
 #include "AuthenticationService.h"
@@ -31,14 +31,14 @@ namespace esphome
 
     void RestServer::setupServer()
     {
-      std::shared_ptr<AsyncWebServer> server = this->base_->get_server();
+      std::shared_ptr<AsyncWebServer> server(this->base_->get_server(), [](AsyncWebServer *) {});
       // Serve static resources from PROGMEM
       WWWData::registerRoutes(
           [server, this](const String &uri, const String &contentType, const uint8_t *content, size_t len)
           {
             ArRequestHandlerFunction requestHandler = [contentType, content, len](AsyncWebServerRequest *request)
             {
-              AsyncWebServerResponse *response = request->beginResponse_P(200, contentType, content, len);
+              AsyncWebServerResponse *response = request->beginResponse(200, contentType.c_str(), content, len);
               response->addHeader("Content-Encoding", "gzip");
               request->send(response);
             };
@@ -47,11 +47,7 @@ namespace esphome
             // OPTIONS get a straight up 200 response
             if (uri.equals("/index.html"))
             {
-              AsyncCallbackWebHandler *handler = new AsyncCallbackWebHandler();
-              handler->setUri(uri.c_str());
-              handler->setMethod(HTTP_GET);
-              handler->onRequest(requestHandler);
-              this->base_->add_handler(handler);
+              server->on(uri.c_str(), HTTP_GET, ArRequestHandlerFunction(requestHandler));
 
               server->onNotFound([requestHandler](AsyncWebServerRequest *request)
                                  {
@@ -65,12 +61,12 @@ namespace esphome
             }
             else
             {
-              server->on(uri.c_str(), HTTP_GET, requestHandler);
+              server->on(uri.c_str(), HTTP_GET, ArRequestHandlerFunction(requestHandler));
           }
           });
 
       // STM32OTA
-      // this->base_->add_handler(new stm32::STM32OTARequestHandler(this->base_));
+      this->base_->add_handler(new stm32::STM32OTARequestHandler(this->base_));
 
       // rest info
       InfoFeature infoFeature = InfoFeature(server);

@@ -1,17 +1,19 @@
 #include "ConfigScheduller.h"
 #include "esphome/components/storage/store.h"
 // #include "esphome/components/storage/settings_schedule.h"
-#include <AsyncJson.h>
 
 
 ConfigScheduller::ConfigScheduller(std::shared_ptr<AsyncWebServer> server)
 {
   server->on(ConfigScheduller_PATH, HTTP_GET, std::bind(&ConfigScheduller::get, this, std::placeholders::_1));
-  // server->on(ConfigScheduller_PATH, HTTP_POST, std::bind(&ConfigScheduller::post, this, std::placeholders::_1));
-  AsyncCallbackJsonWebHandler *handler = new AsyncCallbackJsonWebHandler(ConfigScheduller_PATH, std::bind(&ConfigScheduller::post, this, std::placeholders::_1, std::placeholders::_2));
-  handler->setMethod(HTTP_POST);
-  // handler.setMaxContentLength(MAX_TIME_SIZE);
-  server->addHandler(handler);
+  
+  server->on(ConfigScheduller_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
+    esphome::json::parse_json(request->post_query_, [this, request](JsonObject root) {
+      JsonVariant json = root;
+      this->post(request, json);
+      return true;
+    });
+  });
 }
 
 void ConfigScheduller::get(AsyncWebServerRequest *request)

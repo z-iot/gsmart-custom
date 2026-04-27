@@ -1,7 +1,7 @@
 #ifndef STM32OTAHANDLER_H
 #define STM32OTAHANDLER_H
 
-#include <ESPAsyncWebServer.h>
+#include "esphome/components/web_server_idf/web_server_idf.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 
 namespace esphome {
@@ -12,14 +12,14 @@ class STM32OTARequestHandler : public AsyncWebHandler
 public:
   STM32OTARequestHandler(web_server_base::WebServerBase *parent) : parent_(parent) {}
   void handleRequest(AsyncWebServerRequest *request) override;
-  void handleUpload(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len,
+  void handleUpload(AsyncWebServerRequest *request, const std::string &filename, size_t index, uint8_t *data, size_t len,
                     bool final) override;
-  bool canHandle(AsyncWebServerRequest *request) override
+  bool canHandle(AsyncWebServerRequest *request) const override
   {
     return request->url() == "/updatestm" && request->method() == HTTP_POST;
   }
 
-  bool isRequestHandlerTrivial() override { return false; }
+  bool isRequestHandlerTrivial() const override { return false; }
 
 protected:
   uint32_t last_ota_progress_{0};

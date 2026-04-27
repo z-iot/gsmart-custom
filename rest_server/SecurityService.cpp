@@ -1,6 +1,5 @@
 #include "SecurityService.h"
 #include "esphome/components/storage/store.h"
-// #include <AsyncJson.h>
 
 SecurityService::SecurityService(std::shared_ptr<AsyncWebServer> server) : _jwtHandler(FACTORY_JWT_SECRET)
 {
@@ -58,6 +57,18 @@ void SecurityService::begin()
 
 Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *request)
 {
+#if USE_ESP32
+  auto authorizationHeader = request->get_header(AUTHORIZATION_HEADER);
+  if (authorizationHeader.has_value())
+  {
+    String value(authorizationHeader->c_str());
+    if (value.startsWith(AUTHORIZATION_HEADER_PREFIX))
+    {
+      value = value.substring(AUTHORIZATION_HEADER_PREFIX_LEN);
+      return authenticateJWT(value);
+    }
+  }
+#else
   AsyncWebHeader *authorizationHeader = request->getHeader(AUTHORIZATION_HEADER);
   if (authorizationHeader)
   {
@@ -68,10 +79,11 @@ Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *reque
       return authenticateJWT(value);
     }
   }
+#endif
   else if (request->hasParam(ACCESS_TOKEN_PARAMATER))
   {
     AsyncWebParameter *tokenParamater = request->getParam(ACCESS_TOKEN_PARAMATER);
-    String value = tokenParamater->value();
+    String value(tokenParamater->value().c_str());
     return authenticateJWT(value);
   }
   return Authentication();

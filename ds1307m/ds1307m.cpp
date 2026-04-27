@@ -24,7 +24,7 @@ void DS1307mComponent::dump_config() {
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Communication with DS1307m failed!");
   }
-  ESP_LOGCONFIG(TAG, "  Timezone: '%s'", this->timezone_.c_str());
+
 }
 
 float DS1307mComponent::get_setup_priority() const { return setup_priority::DATA; }

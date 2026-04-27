@@ -2,8 +2,9 @@
 #define SecurityManager_h
 
 #include "ArduinoJsonJWT.h"
-#include <ESPAsyncWebServer.h>
-#include <AsyncJson.h>
+#include "esphome/components/web_server_base/web_server_base.h"
+
+#include <functional>
 #include <list>
 // #include "esphome/components/json/json_util.h"
 
@@ -14,6 +15,10 @@
 #define AUTHORIZATION_HEADER_PREFIX_LEN 7
 
 #define MAX_JWT_SIZE 256
+
+using ArRequestFilterFunction = std::function<bool(AsyncWebServerRequest *)>;
+using ArRequestHandlerFunction = std::function<void(AsyncWebServerRequest *)>;
+using ArJsonRequestHandlerFunction = std::function<void(AsyncWebServerRequest *, JsonVariant &)>;
 
 // class User {
 //  public:

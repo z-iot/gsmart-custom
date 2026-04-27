@@ -1,9 +1,9 @@
 #pragma once
 
-// #include <FS.h>
 #include "esphome/components/json/json_util.h"
 
 #ifdef ESP32
+#include <FS.h>
 #include <SPIFFS.h>
 #define ESPFS SPIFFS
 #elif defined(ESP8266)

@@ -14,6 +14,10 @@
 
 #include <cerrno>
 #include <cstdio>
+#ifdef USE_ESP32
+#include <WiFi.h>
+#include <WiFiClient.h>
+#endif
 
 namespace esphome
 {
@@ -45,7 +49,7 @@ namespace esphome
     void HttpUpdateComponent::dump_config()
     {
       ESP_LOGCONFIG(TAG, "Http Updates:");
-      ESP_LOGCONFIG(TAG, "  Address: %s", network::get_use_address().c_str());
+      ESP_LOGCONFIG(TAG, "  Address: %s", network::get_use_address());
       ESP_LOGCONFIG(TAG, "  Timeout: %ums", this->timeout_);
       ESP_LOGCONFIG(TAG, "  User-Agent: %s", this->useragent_);
       ESP_LOGCONFIG(TAG, "  Follow Redirects: %d", this->follow_redirects_);
@@ -288,7 +292,9 @@ namespace esphome
       this->client_.addHeader("x-ESP32-chip-size", String(ESP.getFlashChipSize()));
       this->client_.addHeader("x-ESP32-sdk-version", ESP.getSdkVersion());
 
-      String fwCode = String(App.get_compilation_time().c_str());
+      char fwCodeBuf[App.BUILD_TIME_STR_SIZE];
+      App.get_build_time_string(fwCodeBuf);
+      String fwCode = String(fwCodeBuf);
       this->client_.addHeader("x-fwcode", fwver_.c_str());
       this->client_.addHeader("x-CompTime", fwCode);
       this->client_.addHeader("x-fwver", fwver_.c_str());
@@ -526,7 +532,7 @@ namespace esphome
       while (total < ota_size)
       {
         // TODO: timeout check
-        size_t requested = std::min(sizeof(buf), ota_size - total);
+        size_t requested = std::min((size_t) sizeof(buf), (size_t) (ota_size - total));
         // ssize_t read = fw_stream->read(buf, requested);
 
         // toRead = 0;

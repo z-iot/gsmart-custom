@@ -72,8 +72,11 @@ def validate_local(config):
 
 
 def validate_ota(config):
-    if CORE.using_esp_idf and config[CONF_OTA]:
-        raise cv.Invalid("Enabling 'ota' is not supported for IDF framework yet")
+    if CONF_OTA in config and config[CONF_OTA] is not False:
+        raise cv.Invalid(
+            f"The '{CONF_OTA}' option in 'esp_server' only accepts 'false' to disable OTA. "
+            "To enable OTA, use the OTA platform configuration instead."
+        )
     return config
 
 
@@ -174,14 +177,7 @@ CONFIG_SCHEMA = cv.All(
                 web_server_base.WebServerBase
             ),
             cv.Optional(CONF_INCLUDE_INTERNAL, default=False): cv.boolean,
-            cv.SplitDefault(
-                CONF_OTA,
-                esp8266=True,
-                esp32_arduino=True,
-                esp32_idf=False,
-                bk72xx=True,
-                rtl87xx=True,
-            ): cv.boolean,
+            cv.Optional(CONF_OTA): cv.boolean,
             cv.Optional(CONF_LOG, default=True): cv.boolean,
             cv.Optional(CONF_LOCAL): cv.boolean,
             cv.Optional(CONF_SORTING_GROUPS): cv.ensure_list(sorting_group),
@@ -261,11 +257,13 @@ async def to_code(config):
 
     var = cg.new_Pvariable(config[CONF_ID], paren)
     await cg.register_component(var, config)
+    CORE.register_controller()
 
     version = config[CONF_VERSION]
 
     cg.add(paren.set_port(config[CONF_PORT]))
     cg.add_define("USE_WEBSERVER")
+    cg.add_define("USE_ESP_SERVER")
     cg.add_define("USE_WEBSERVER_PORT", config[CONF_PORT])
     cg.add_define("USE_WEBSERVER_VERSION", version)
     if version >= 2:
@@ -274,7 +272,8 @@ async def to_code(config):
     else:
         cg.add(var.set_css_url(config[CONF_CSS_URL]))
         cg.add(var.set_js_url(config[CONF_JS_URL]))
-    cg.add(var.set_allow_ota(config[CONF_OTA]))
+    if config.get(CONF_OTA) is False:
+        cg.add_define("USE_WEBSERVER_OTA_DISABLED")
     cg.add(var.set_expose_log(config[CONF_LOG]))
     if config[CONF_ENABLE_PRIVATE_NETWORK_ACCESS]:
         cg.add_define("USE_WEBSERVER_PRIVATE_NETWORK_ACCESS")

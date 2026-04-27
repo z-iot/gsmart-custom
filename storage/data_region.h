@@ -118,7 +118,7 @@ namespace esphome
 
       RegionLayout layout;
       int16_t selfIndex = -1;
-      ESPPreferenceObject pref = nullptr;
+      ESPPreferenceObject pref{};
     };
 
   }

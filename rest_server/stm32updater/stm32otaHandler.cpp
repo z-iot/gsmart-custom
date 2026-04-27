@@ -4,27 +4,28 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "esphome/core/component.h"
+#include "esphome/components/web_server_base/web_server_base.h"
 
 namespace esphome {
 namespace stm32 {
 
-static const char *const TAG = "stm32otaHandler";
+static const char *const OTA_TAG = "stm32otaHandler";
 
 void report_ota_error()
 {
   StreamString ss;
   Stm32Updater.printError(ss);
   String progError = Stm32Updater._programmer->_error;
-  ESP_LOGW(TAG, "STM OTA Update failed! Error: %s (%s)", ss.c_str(), progError.c_str());
+  ESP_LOGW(OTA_TAG, "STM OTA Update failed! Error: %s (%s)", ss.c_str(), progError.c_str());
 }
 
-void STM32OTARequestHandler::handleUpload(AsyncWebServerRequest *request, const String &filename, size_t index,
+void STM32OTARequestHandler::handleUpload(AsyncWebServerRequest *request, const std::string &filename, size_t index,
                                           uint8_t *data, size_t len, bool final)
 {
   bool success;
   if (index == 0)
   {
-    ESP_LOGI(TAG, "STM OTA Update Start: %s", filename.c_str());
+    ESP_LOGI(OTA_TAG, "STM OTA Update Start: %s", filename.c_str());
     this->ota_read_length_ = 0;
     if (Stm32Updater.isRunning())
       Stm32Updater.abort();
@@ -55,11 +56,11 @@ void STM32OTARequestHandler::handleUpload(AsyncWebServerRequest *request, const 
     if (request->contentLength() != 0)
     {
       float percentage = (this->ota_read_length_ * 100.0f) / request->contentLength();
-      ESP_LOGD(TAG, "STM OTA in progress: %0.1f%%", percentage);
+      ESP_LOGD(OTA_TAG, "STM OTA in progress: %0.1f%%", percentage);
     }
     else
     {
-      ESP_LOGD(TAG, "STM OTA in progress: %u bytes read", this->ota_read_length_);
+      ESP_LOGD(OTA_TAG, "STM OTA in progress: %u bytes read", this->ota_read_length_);
     }
     this->last_ota_progress_ = now;
   }
@@ -68,7 +69,7 @@ void STM32OTARequestHandler::handleUpload(AsyncWebServerRequest *request, const 
   {
     if (Stm32Updater.end(true))
     {
-      ESP_LOGI(TAG, "STM OTA update successful!");
+      ESP_LOGI(OTA_TAG, "STM OTA update successful!");
       // this->parent_->set_timeout(100, []() { App.safe_reboot(); });
     }
     else
@@ -89,7 +90,7 @@ void STM32OTARequestHandler::handleRequest(AsyncWebServerRequest *request)
     StreamString ss;
     ss.print("STM Update Failed: ");
     Stm32Updater.printError(ss);
-    response = request->beginResponse(200, "text/plain", ss);
+    response = request->beginResponse(200, "text/plain", std::string(ss.c_str()));
   }
   response->addHeader("Connection", "close");
   request->send(response);

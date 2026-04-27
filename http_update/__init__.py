@@ -197,6 +197,8 @@ async def to_code(config):
         cg.add_define("USE_HTTP_UPDATE_ESP8266_HTTPS")
 
     if CORE.is_esp32:
+        cg.add_library("Network", None)
+        cg.add_library("WiFi", None)
         cg.add_library("WiFiClientSecure", None)
         cg.add_library("HTTPClient", None)
     if CORE.is_esp8266:
@@ -227,7 +229,7 @@ HTTP_UPDATE_GET_ACTION_SCHEMA = automation.maybe_conf(
 
 
 @automation.register_action(
-    "http_update.flash", HttpUpdateFlashAction, HTTP_UPDATE_GET_ACTION_SCHEMA
+    "http_update.flash", HttpUpdateFlashAction, HTTP_UPDATE_GET_ACTION_SCHEMA, synchronous=True
 )
 
 async def http_update_action_to_code(config, action_id, template_arg, args):
@@ -236,7 +238,8 @@ async def http_update_action_to_code(config, action_id, template_arg, args):
 
     template_ = await cg.templatable(config[CONF_URL], args, cg.std_string)
     cg.add(var.set_url(template_))
-    cg.add(var.set_method(config[CONF_METHOD]))
+    template_ = await cg.templatable(config[CONF_METHOD], args, cg.const_char_ptr)
+    cg.add(var.set_method(template_))
     for key in config.get(CONF_HEADERS, []):
         template_ = await cg.templatable(
             config[CONF_HEADERS][key], args, cg.const_char_ptr

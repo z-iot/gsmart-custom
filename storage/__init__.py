@@ -53,6 +53,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     if CORE.using_arduino:
         if CORE.is_esp32:
+            cg.add_library("FS", None)
             cg.add_library("SPIFFS", None)
         elif CORE.is_esp8266:
             cg.add_library("LittleFS", None)

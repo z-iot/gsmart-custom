@@ -141,7 +141,7 @@ template<typename... Ts> class HttpUpdateFlashAction : public Action<Ts...> {
 
   void register_response_trigger(HttpUpdateResponseTrigger *trigger) { this->response_triggers_.push_back(trigger); }
 
-  void play(Ts... x) override {
+  void play(const Ts &...x) override {
     this->parent_->set_url(this->url_.value(x...));
     this->parent_->set_method(this->method_.value(x...));
 

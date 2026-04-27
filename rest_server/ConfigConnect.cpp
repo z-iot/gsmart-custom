@@ -42,7 +42,12 @@ public:
 ConfigConnect::ConfigConnect(std::shared_ptr<AsyncWebServer> server)
 {
   server->on(ConfigConnect_PATH, HTTP_GET, std::bind(&ConfigConnect::get, this, std::placeholders::_1));
-  server->on(ConfigConnect_PATH, HTTP_POST, std::bind(&ConfigConnect::post, this, std::placeholders::_1));
+  server->on(ConfigConnect_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
+    esphome::json::parse_json(request->post_query_, [this, request](JsonObject root) {
+      this->post(request);
+      return true;
+    });
+  });
 }
 
 void ConfigConnect::get(AsyncWebServerRequest *request)

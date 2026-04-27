@@ -2,9 +2,10 @@
 #define AuthenticationService_H_
 
 // #include <AsyncJson.h>
-#include <ESPAsyncWebServer.h>
+#include "esphome/components/web_server_base/web_server_base.h"
+
 #include "SecurityManager.h"
-#include <ArduinoJWT.h>
+#include "ArduinoJsonJWT.h"
 
 #define VERIFY_AUTHORIZATION_PATH "/sec/me"
 #define SIGN_IN_PATH "/sec/signin"
@@ -24,9 +25,7 @@ public:
   String generateJWT(String username);
 
 private:
-  // ArduinoJsonJWT *_jwtHandler = new ArduinoJsonJWT(FACTORY_JWT_SECRET);
-  
-  ArduinoJWT *jwt = new ArduinoJWT(FACTORY_JWT_SECRET);
+  ArduinoJsonJWT *jwt = new ArduinoJsonJWT(FACTORY_JWT_SECRET);
   SecurityManager *_securityManager;
   // AsyncCallbackJsonWebHandler _signInHandler;
 

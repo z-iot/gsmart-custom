@@ -15,7 +15,7 @@ class EspServer : public WebServer {
   void setup() override;
   // void loop() override;
   // void dump_config() override;
-  bool canHandle(AsyncWebServerRequest *request) override;
+  bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
 
  protected:

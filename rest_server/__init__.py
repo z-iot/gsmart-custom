@@ -4,6 +4,7 @@ from esphome.const import CONF_ID
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 from esphome.components import web_server_base
 from esphome.core import CORE
+from pathlib import Path
 
 AUTO_LOAD = ["web_server_base"]
 
@@ -25,10 +26,12 @@ async def to_code(config):
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
 
     cg.add_define("USE_RESTSERVER")
+    component_dir = Path(__file__).parent.resolve().as_posix()
+    cg.add_build_flag(f"-I{component_dir}")
 
     var = cg.new_Pvariable(config[CONF_ID], paren)
     await cg.register_component(var, config)
 
     if CORE.using_arduino:
-        cg.add_library("ArduinoJWT", None)
+        pass
         

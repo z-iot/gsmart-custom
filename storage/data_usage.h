@@ -35,7 +35,7 @@ namespace esphome
     struct UsageBeam
     {
       UsageBeamPref pref;
-      ESPPreferenceObject prefObj = nullptr;
+      ESPPreferenceObject prefObj{};
       uint32_t lastStart = 0;
       uint32_t lastStop = 0;
     };
@@ -52,7 +52,7 @@ namespace esphome
     struct UsageLamp
     {
       UsageLampPref pref;
-      ESPPreferenceObject prefObj = nullptr;
+      ESPPreferenceObject prefObj{};
       uint32_t lastStart = 0;
       uint32_t lastStop = 0;
     };
