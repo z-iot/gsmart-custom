@@ -30,16 +30,16 @@ namespace esphome
       {
         udp_server::udpServer->add_on_neighbor_callback(
             [this](udp_server::DeviceItem *deviceItem)
-            { this->events_.send(deviceItem->toEventMessage().c_str(), "neighbor"); });
+            { this->events_.try_send_nodefer(deviceItem->toEventMessage().c_str(), "neighbor"); });
         udp_server::udpServer->add_on_control_callback(
             [this](udp_server::PacketControl packet)
-            { this->events_.send(udp_server::packetControlToJsonStr(packet).c_str(), "udp_control"); });
+            { this->events_.try_send_nodefer(udp_server::packetControlToJsonStr(packet).c_str(), "udp_control"); });
         udp_server::udpServer->add_on_status_callback(
             [this](udp_server::PacketStatus packet)
-            { this->events_.send(udp_server::packetStatusToJsonStr(packet).c_str(), "udp_status"); });
+            { this->events_.try_send_nodefer(udp_server::packetStatusToJsonStr(packet).c_str(), "udp_status"); });
         udp_server::udpServer->add_on_identity_callback(
             [this](udp_server::PacketIdentity packet)
-            { this->events_.send(udp_server::packetIdentityToJsonStr(packet).c_str(), "udp_identity"); });
+            { this->events_.try_send_nodefer(udp_server::packetIdentityToJsonStr(packet).c_str(), "udp_identity"); });
       }
 #endif
 #ifdef USE_STORAGE
@@ -47,7 +47,7 @@ namespace esphome
       {
         storage::store->add_on_situation_change(
             [this]()
-            { this->events_.send(storage::store->global->situationToJsonStr().c_str(), "situation"); });
+            { this->events_.try_send_nodefer(storage::store->global->situationToJsonStr().c_str(), "situation"); });
       }
 
       // this->events_.onConnect([this](AsyncEventSourceClient *client)

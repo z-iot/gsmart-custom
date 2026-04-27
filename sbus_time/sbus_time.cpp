@@ -44,7 +44,6 @@ namespace esphome
     void SbusTimeComponent::dump_config()
     {
       ESP_LOGCONFIG(TAG, "SbusTime:");
-      ESP_LOGCONFIG(TAG, "  Timezone: '%s'", this->timezone_.c_str());
     }
 
     float SbusTimeComponent::get_setup_priority() const { return setup_priority::DATA; }
