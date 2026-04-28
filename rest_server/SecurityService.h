@@ -5,8 +5,6 @@
 #include "esphome/components/json/json_util.h"
 #include "SecurityManager.h"
 
-#define SecurityServiceSignIn_PATH "/sec/signin"
-
 #ifndef FACTORY_JWT_SECRET
 #define FACTORY_JWT_SECRET "#{random}-#{random}"
 #endif

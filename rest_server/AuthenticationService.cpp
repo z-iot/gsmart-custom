@@ -8,7 +8,7 @@ AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> ser
   server->on(VERIFY_AUTHORIZATION_PATH, HTTP_GET, std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
   server->on(SIGN_IN_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
-    esphome::json::parse_json(request->post_query_, [this, request](JsonObject root) {
+    esphome::json::parse_json(request->getBody(), [this, request](JsonObject root) {
       JsonVariant json = root;
       this->signIn(request, json);
       return true;

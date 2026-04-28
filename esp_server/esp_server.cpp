@@ -57,10 +57,12 @@ namespace esphome
 
     bool EspServer::canHandle(AsyncWebServerRequest *request) const
     {
-
       if (request->url() == "/esp")
         return true;
       if (request->url() == "/")
+        return false;
+      std::string url = request->url().c_str();
+      if (url.find("/sec/") == 0 || url.find("/api/") == 0 || url.find("/rest/") == 0)
         return false;
       return WebServer::canHandle(request);
     }
@@ -74,6 +76,7 @@ namespace esphome
       }
       if (request->url() == "/")
       {
+        request->redirect("/esp");
         return;
       }
       WebServer::handleRequest(request);

@@ -453,21 +453,21 @@ void WebServer::dump_config() {
 }
 float WebServer::get_setup_priority() const { return setup_priority::WIFI - 1.0f; }
 
-#ifdef USE_WEBSERVER_LOCAL
-void WebServer::handle_index_request(AsyncWebServerRequest *request) {
-#ifndef USE_ESP8266
-  AsyncWebServerResponse *response = request->beginResponse(200, "text/html", INDEX_GZ, sizeof(INDEX_GZ));
-#else
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", INDEX_GZ, sizeof(INDEX_GZ));
-#endif
-#ifdef USE_WEBSERVER_GZIP
-  response->addHeader(ESPHOME_F("Content-Encoding"), ESPHOME_F("gzip"));
-#else
-  response->addHeader(ESPHOME_F("Content-Encoding"), ESPHOME_F("br"));
-#endif
-  request->send(response);
-}
-#elif USE_WEBSERVER_VERSION >= 2
+// #ifdef USE_WEBSERVER_LOCAL
+// void WebServer::handle_index_request(AsyncWebServerRequest *request) {
+// #ifndef USE_ESP8266
+//   AsyncWebServerResponse *response = request->beginResponse(200, "text/html", INDEX_GZ, sizeof(INDEX_GZ));
+// #else
+//   AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", INDEX_GZ, sizeof(INDEX_GZ));
+// #endif
+// #ifdef USE_WEBSERVER_GZIP
+//   response->addHeader(ESPHOME_F("Content-Encoding"), ESPHOME_F("gzip"));
+// #else
+//   response->addHeader(ESPHOME_F("Content-Encoding"), ESPHOME_F("br"));
+// #endif
+//   request->send(response);
+// }
+#if USE_WEBSERVER_VERSION >= 2
 void WebServer::handle_index_request(AsyncWebServerRequest *request) {
 #ifndef USE_ESP8266
   AsyncWebServerResponse *response =

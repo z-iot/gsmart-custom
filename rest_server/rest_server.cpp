@@ -39,7 +39,6 @@ namespace esphome
             ArRequestHandlerFunction requestHandler = [contentType, content, len](AsyncWebServerRequest *request)
             {
               AsyncWebServerResponse *response = request->beginResponse(200, contentType.c_str(), content, len);
-              response->addHeader("Content-Encoding", "gzip");
               request->send(response);
             };
 
