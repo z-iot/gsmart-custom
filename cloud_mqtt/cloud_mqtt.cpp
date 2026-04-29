@@ -13,6 +13,22 @@ namespace cloud_mqtt {
 
 static const char *const TAG = "cloud_mqtt";
 
+namespace {
+bool payload_starts_json_object(const std::string &payload) {
+  for (char c : payload) {
+    if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+      continue;
+    return c == '{';
+  }
+  return false;
+}
+
+std::string extract_msg_id(JsonObject root) {
+  const char *msg_id = root["msg_id"] | "";
+  return msg_id;
+}
+}  // namespace
+
 std::string CloudMqtt::getCloudTopicBase() {
   if (!this->topic_base_.empty())
     return this->topic_base_;
@@ -26,6 +42,14 @@ std::string CloudMqtt::getCloudTopic(const std::string &suffix) {
   if (suffix.empty())
     return this->getCloudTopicBase();
   return this->getCloudTopicBase() + "/" + suffix;
+}
+
+bool CloudMqtt::publish_cloud_json(const std::string &suffix, const json::json_build_t &f, uint8_t qos, bool retain) {
+  if (mqtt::global_mqtt_client == nullptr) {
+    ESP_LOGW(TAG, "MQTT client is not available, skip publish to %s", suffix.c_str());
+    return false;
+  }
+  return this->publish_json(this->getCloudTopic(suffix), f, qos, retain);
 }
 
 void CloudMqtt::setup() {
@@ -107,27 +131,79 @@ void CloudMqtt::on_device_command_(const std::string &topic, const std::string &
 }
 
 void CloudMqtt::processDeviceCommand(std::string topic, std::string payload) {
-  bool found = false;
-  for (auto *cmd_listener : this->cmd_device_listeners_) {
-    if (cmd_listener->process(topic, payload)) {
-      found = true;
-      break;
-    }
-  }
-  if (!found)
+  if (!this->dispatch_command_(this->cmd_device_listeners_, topic, payload))
     ESP_LOGW(TAG, "Received command for unknown device topic: %s", topic.c_str());
+}
+
+bool CloudMqtt::dispatch_command_(const std::vector<CloudCmdListener *> &listeners, const std::string &topic,
+                                  const std::string &payload) {
+  for (auto *cmd_listener : listeners) {
+    if (!cmd_listener->matches(topic))
+      continue;
+
+    if (cmd_listener->expects_json()) {
+      bool handled = false;
+      std::string msg_id;
+      bool parsed = json::parse_json(payload, [cmd_listener, &topic, &handled, &msg_id](JsonObject root) -> bool {
+        msg_id = extract_msg_id(root);
+        handled = cmd_listener->process_json(topic, root);
+        return true;
+      });
+
+      if (!parsed) {
+        ESP_LOGW(TAG, "Invalid JSON command payload for topic: %s", topic.c_str());
+        return true;
+      }
+
+      if (!msg_id.empty()) {
+        this->publish_ack_(msg_id, handled ? "accepted" : "rejected", handled ? nullptr : "command_not_handled");
+      }
+      return true;
+    }
+
+    std::string msg_id;
+    if (payload_starts_json_object(payload)) {
+      json::parse_json(payload, [&msg_id](JsonObject root) -> bool {
+        msg_id = extract_msg_id(root);
+        return true;
+      });
+    }
+
+    bool handled = cmd_listener->process(topic, payload);
+    if (!msg_id.empty())
+      this->publish_ack_(msg_id, handled ? "accepted" : "rejected", handled ? nullptr : "command_not_handled");
+    return true;
+  }
+
+  if (payload_starts_json_object(payload)) {
+    std::string msg_id;
+    json::parse_json(payload, [&msg_id](JsonObject root) -> bool {
+      msg_id = extract_msg_id(root);
+      return true;
+    });
+    if (!msg_id.empty())
+      this->publish_ack_(msg_id, "rejected", "unknown_command");
+  }
+  return false;
+}
+
+bool CloudMqtt::publish_ack_(const std::string &msg_id, const char *result, const char *error) {
+  std::string device_id = storage::store != nullptr ? storage::store->get_serial() : get_mac_address().substr(6);
+  return this->publish_cloud_json("ack", [msg_id, device_id, result, error](JsonObject root) {
+    root["msg_id"] = msg_id;
+    root["device_id"] = device_id;
+    root["result"] = result;
+    if (error == nullptr) {
+      root["error"] = nullptr;
+    } else {
+      root["error"] = error;
+    }
+  });
 }
 
 #ifdef GSMART_FEATURE_REGION
 void CloudMqtt::processRegionCommand(std::string topic, std::string payload) {
-  bool found = false;
-  for (auto *cmd_listener : this->cmd_region_listeners_) {
-    if (cmd_listener->process(topic, payload)) {
-      found = true;
-      break;
-    }
-  }
-  if (!found)
+  if (!this->dispatch_command_(this->cmd_region_listeners_, topic, payload))
     ESP_LOGW(TAG, "Received command for unknown region topic: %s", topic.c_str());
 }
 #endif
@@ -175,11 +251,15 @@ bool CloudJsonCmdTrigger::process(std::string topic, std::string payload) {
   if (this->cmd_topic_ != topic)
     return false;
 
-  json::parse_json(payload, [this](JsonObject root) -> bool {
-    this->trigger(root);
-    return true;
-  });
+  json::parse_json(payload, [this, topic](JsonObject root) -> bool { return this->process_json(topic, root); });
 
+  return true;
+}
+
+bool CloudJsonCmdTrigger::process_json(std::string topic, JsonObject root) {
+  if (this->cmd_topic_ != topic)
+    return false;
+  this->trigger(root);
   return true;
 }
 
@@ -187,11 +267,15 @@ bool CloudJsonCmdRegionTrigger::process(std::string topic, std::string payload) 
   if (this->cmd_topic_ != topic)
     return false;
 
-  json::parse_json(payload, [this](JsonObject root) -> bool {
-    this->trigger(root);
-    return true;
-  });
+  json::parse_json(payload, [this, topic](JsonObject root) -> bool { return this->process_json(topic, root); });
 
+  return true;
+}
+
+bool CloudJsonCmdRegionTrigger::process_json(std::string topic, JsonObject root) {
+  if (this->cmd_topic_ != topic)
+    return false;
+  this->trigger(root);
   return true;
 }
 
