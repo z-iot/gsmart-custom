@@ -67,7 +67,7 @@ namespace esphome
       };
 #else
       const auto &url = request->url();
-      auto starts_with = [&](const char *prefix, size_t plen) { return url.find(prefix) == 0; };
+      auto starts_with = [&](const char *prefix, size_t plen) { return url.startsWith(prefix); };
 #endif
       if (url == "/esp")
         return true;

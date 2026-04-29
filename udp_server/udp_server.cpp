@@ -286,14 +286,16 @@ namespace esphome
       {
         if (packet_size < sizeof(PacketHeader))
         {
-          ESP_LOGD(TAG, "Ignoring small packet %s: from: %s:%u, size %zu.", main ? "main" : "channel", network::IPAddress(udp->remoteIP()).str().c_str(), udp->remotePort(), packet_size);
+          char remote_ip[network::IP_ADDRESS_BUFFER_SIZE];
+          ESP_LOGD(TAG, "Ignoring small packet %s: from: %s:%u, size %zu.", main ? "main" : "channel", network::IPAddress(udp->remoteIP()).str_to(remote_ip), udp->remotePort(), packet_size);
           continue;
         }
 
         packet.body.resize(packet_size - sizeof(PacketHeader));
         if (!udp->read(reinterpret_cast<unsigned char *>(&packet.header), sizeof(PacketHeader)) || !udp->read(packet.body.data(), packet.body.size()))
         {
-          ESP_LOGD(TAG, "Error reading of packet %s: from: %s:%u, size %zu.", main ? "main" : "channel", network::IPAddress(udp->remoteIP()).str().c_str(), udp->remotePort(), packet_size);
+          char remote_ip[network::IP_ADDRESS_BUFFER_SIZE];
+          ESP_LOGD(TAG, "Error reading of packet %s: from: %s:%u, size %zu.", main ? "main" : "channel", network::IPAddress(udp->remoteIP()).str_to(remote_ip), udp->remotePort(), packet_size);
           continue;
         }
 
@@ -370,7 +372,8 @@ namespace esphome
 
     void UdpServer::processPacket(bool main, IPAddress remoteIP, uint16_t remotePort, PacketUdpServer &packet)
     {
-      ESP_LOGD(TAG, "Receive packet %s: from: %s:%u, kind: %u, body size %zu.", main ? "main" : "channel", network::IPAddress(remoteIP).str().c_str(), remotePort, static_cast<uint8_t>(packet.header.packetKind), packet.body.size());
+      char remote_ip[network::IP_ADDRESS_BUFFER_SIZE];
+      ESP_LOGD(TAG, "Receive packet %s: from: %s:%u, kind: %u, body size %zu.", main ? "main" : "channel", network::IPAddress(remoteIP).str_to(remote_ip), remotePort, static_cast<uint8_t>(packet.header.packetKind), packet.body.size());
 
       switch (packet.header.packetKind)
       {
@@ -456,14 +459,16 @@ namespace esphome
       if (main)
       {
         writePacket(main, headerData, bodyData, bodyLen);
-        ESP_LOGD(TAG, "Send msg main: to: %s:%u, kind: %u, size %zu, channel: %u", network::IPAddress(getIp(main)).str().c_str(), getPort(main), static_cast<uint8_t>(packetHeader.packetKind), sizeof(packetHeader) + bodyLen, channel_);
+        char target_ip[network::IP_ADDRESS_BUFFER_SIZE];
+        ESP_LOGD(TAG, "Send msg main: to: %s:%u, kind: %u, size %zu, channel: %u", network::IPAddress(getIp(main)).str_to(target_ip), getPort(main), static_cast<uint8_t>(packetHeader.packetKind), sizeof(packetHeader) + bodyLen, channel_);
       }
       else
       {
         if (channel_ != 0)
         {
           writePacket(main, headerData, bodyData, bodyLen);
-          ESP_LOGD(TAG, "Send msg channel: to: %s:%u, kind: %u, size %zu, channel: %u", network::IPAddress(getIp(main)).str().c_str(), getPort(main), static_cast<uint8_t>(packetHeader.packetKind), sizeof(packetHeader) + bodyLen, channel_);
+          char target_ip[network::IP_ADDRESS_BUFFER_SIZE];
+          ESP_LOGD(TAG, "Send msg channel: to: %s:%u, kind: %u, size %zu, channel: %u", network::IPAddress(getIp(main)).str_to(target_ip), getPort(main), static_cast<uint8_t>(packetHeader.packetKind), sizeof(packetHeader) + bodyLen, channel_);
         }
       }
     }
