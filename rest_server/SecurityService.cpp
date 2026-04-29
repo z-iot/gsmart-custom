@@ -1,8 +1,5 @@
 #include "SecurityService.h"
 #include "esphome/components/storage/store.h"
-#include "esphome/core/log.h"
-
-static const char *const TAG = "security_service";
 
 SecurityService::SecurityService(std::shared_ptr<AsyncWebServer> server) : _jwtHandler(FACTORY_JWT_SECRET)
 {
@@ -94,6 +91,8 @@ Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *reque
 
 void SecurityService::configureJWTHandler()
 {
+  if (_state.jwtSecret.isEmpty())
+    _state.jwtSecret = FACTORY_JWT_SECRET;
   _jwtHandler.setSecret(_state.jwtSecret);
 }
 
@@ -122,22 +121,14 @@ Authentication SecurityService::authenticateJWT(String &jwt)
 
 Authentication SecurityService::authenticate(const String &username, const String &password)
 {
-  ESP_LOGI(TAG, ">>> authenticate() START - username='%s', password='%s'", username.c_str(), password.c_str());
-
-  ESP_LOGI(TAG, ">>> authenticate: Checking if admin (admin/12345678)");
   if (username == "admin" && password == "12345678") {
-    ESP_LOGI(TAG, ">>> authenticate: MATCH! Admin authenticated");
     return Authentication(username);
   }
-  ESP_LOGI(TAG, ">>> authenticate: Not admin, checking service (service/1234)");
 
   if (username == "service" && password == "1234") {
-    ESP_LOGI(TAG, ">>> authenticate: MATCH! Service authenticated");
     return Authentication(username);
   }
-  ESP_LOGI(TAG, ">>> authenticate: No match! Credentials invalid");
 
-  ESP_LOGW(TAG, ">>> authenticate: FAILED for username: '%s' - returning empty Authentication", username.c_str());
   return Authentication();
 }
 

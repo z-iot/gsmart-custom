@@ -5,16 +5,11 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 #include "SecurityManager.h"
-#include "ArduinoJsonJWT.h"
 
 #define VERIFY_AUTHORIZATION_PATH "/sec/me"
 #define SIGN_IN_PATH "/sec/signin"
 
 #define MAX_AUTHENTICATION_SIZE 256
-
-#ifndef FACTORY_JWT_SECRET
-#define FACTORY_JWT_SECRET "#9999-#8888"
-#endif
 
 class AuthenticationService
 {
@@ -27,7 +22,6 @@ public:
   void verifyAuthorization(AsyncWebServerRequest *request);
 
 private:
-  ArduinoJsonJWT *jwt = new ArduinoJsonJWT(FACTORY_JWT_SECRET);
   SecurityManager *_securityManager;
   // AsyncCallbackJsonWebHandler _signInHandler;
 };

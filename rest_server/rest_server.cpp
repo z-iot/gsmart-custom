@@ -87,6 +87,7 @@ namespace esphome
 
 
       SecurityService *securityService = new SecurityService(server);
+      securityService->begin();
       new AuthenticationService(server, securityService);
 
 

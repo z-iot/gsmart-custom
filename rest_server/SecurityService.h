@@ -27,7 +27,7 @@
 
 class SecuritySettings {
  public:
-  String jwtSecret;
+  String jwtSecret{FACTORY_JWT_SECRET};
   // std::vector<User> users;
 
   // static void read(SecuritySettings& settings, JsonObject& root) {
