@@ -94,10 +94,10 @@ namespace esphome
       {
         root["serial"] = convertRegionSerialtoStr(this->layout.serial); // TODO
         root["mst"] = this->layout.masterIndex;
-        JsonArray memArray = root.createNestedArray("mem");
+        JsonArray memArray = root["mem"].to<JsonArray>();
         for (int i = 0; i < this->layout.memberCount; i++)
         {
-          JsonObject memObj = memArray.createNestedObject();
+          JsonObject memObj = memArray.add<JsonObject>();
           memObj["b"] = convertModelToStr(this->layout.members[i].modelNum);
           memObj["m"] = convertMacToStr(this->layout.members[i].mac);
         }

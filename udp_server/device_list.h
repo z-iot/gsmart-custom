@@ -36,10 +36,10 @@ namespace esphome
 
       void toJson(JsonObject &root)
       {
-        JsonArray arr = root.createNestedArray("devices");
+        JsonArray arr = root["devices"].to<JsonArray>();
         for (auto &item : this->Items)
         {
-          JsonObject arrItem = arr.createNestedObject();
+          JsonObject arrItem = arr.add<JsonObject>();
           item->toJson(arrItem);
         }
       }

@@ -23,7 +23,7 @@ namespace esphome
     public:
       FileSystem();
 
-      bool readFromFS(const char *filePath, DynamicJsonDocument &doc)
+      bool readFromFS(const char *filePath, JsonDocument &doc)
       {
         File settingsFile = ESPFS.open(filePath, "r");
 
@@ -92,10 +92,10 @@ namespace esphome
         }
 
         File file = dir.openNextFile();
-        JsonArray arr = root.createNestedArray("files");
+        JsonArray arr = root["files"].to<JsonArray>();
         while (file)
         {
-          JsonObject arrItem = arr.createNestedObject();
+          JsonObject arrItem = arr.add<JsonObject>();
           arrItem["filename"] = (String(file.name()).startsWith("/") ? String(file.name()).substring(1) : file.name());
           arrItem["type"] = (file.isDirectory() ? "Dir" : "File");
           arrItem["size"] = FileSystem::convertSizeToStr(file.size());
@@ -115,10 +115,10 @@ namespace esphome
           return;
         }
 
-        JsonArray arr = root.createNestedArray("files");
+        JsonArray arr = root["files"].to<JsonArray>();
         while (dir.next())
         {
-          JsonObject arrItem = arr.createNestedObject();
+          JsonObject arrItem = arr.add<JsonObject>();
           arrItem["filename"] = (String(dir.fileName()).startsWith("/") ? String(dir.fileName()).substring(1) : dir.fileName());
           arrItem["type"] = (dir.isDirectory() ? "Dir" : "File");
           arrItem["size"] = FileSystem::convertSizeToStr(dir.fileSize());

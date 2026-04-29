@@ -37,7 +37,7 @@ void InfoNeighborhood::get(AsyncWebServerRequest *request)
       root["fs_used"] = esphome::storage::fileSystem->GetUsedBytes();
 
       //TODO vyhodit
-      JsonObject dir = root.createNestedObject("root_dir");
+      JsonObject dir = root["root_dir"].to<JsonObject>();
       esphome::storage::fileSystem->listDir(dir);
     });
 

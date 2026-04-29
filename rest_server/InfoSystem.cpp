@@ -38,13 +38,13 @@ void InfoSystem::get(AsyncWebServerRequest *request)
                                                  root["fs_used"] = esphome::storage::fileSystem->GetUsedBytes();
 
                                                  // TODO vyhodit
-                                                 JsonObject dir = root.createNestedObject("root_dir");
+                                                 JsonObject dir = root["root_dir"].to<JsonObject>();
                                                  esphome::storage::fileSystem->listDir(dir);
 
-                                                 JsonObject schedule = root.createNestedObject("schedule");
+                                                 JsonObject schedule = root["schedule"].to<JsonObject>();
                                                  esphome::storage::store->schedule->toJson(schedule);
 
-                                                 JsonObject process = root.createNestedObject("process");
+                                                 JsonObject process = root["process"].to<JsonObject>();
 
                                                  //  process["getCurrentScheduleRadiation"] = esphome::storage::store->getCurrentScheduleRadiation(id(esptime).now().timestamp);;
                                                  //  process["time"] = id(esptime).now().strftime("%a %d.%b %M:%S").c_str();
@@ -63,10 +63,10 @@ void InfoSystem::get(AsyncWebServerRequest *request)
                                                  // root["lastSource"] = esphome::storage::kindRadiationSourceToStr(esphome::storage::store->global->radiation.lastSource);
 
 
-                                                // JsonObject region = root.createNestedObject("region");
+                                                // JsonObject region = root["region"].to<JsonObject>();
                                                 // esphome::storage::store->region->saveToJson(region);
 
-                                                JsonObject usage = root.createNestedObject("usage");
+                                                JsonObject usage = root["usage"].to<JsonObject>();
                                                 esphome::storage::store->usage->fillAdvertise(usage);
                                                });
 

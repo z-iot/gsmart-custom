@@ -1,5 +1,8 @@
 #include "SecurityService.h"
 #include "esphome/components/storage/store.h"
+#include "esphome/core/log.h"
+
+static const char *const TAG = "security_service";
 
 SecurityService::SecurityService(std::shared_ptr<AsyncWebServer> server) : _jwtHandler(FACTORY_JWT_SECRET)
 {
@@ -96,7 +99,7 @@ void SecurityService::configureJWTHandler()
 
 Authentication SecurityService::authenticateJWT(String &jwt)
 {
-  DynamicJsonDocument payloadDocument(MAX_JWT_SIZE);
+  JsonDocument payloadDocument;
   _jwtHandler.parseJWT(jwt, payloadDocument);
   if (payloadDocument.is<JsonObject>())
   {
@@ -119,22 +122,22 @@ Authentication SecurityService::authenticateJWT(String &jwt)
 
 Authentication SecurityService::authenticate(const String &username, const String &password)
 {
-  // User user = User(username, password, "customer");
-  // return Authentication(user);
+  ESP_LOGI(TAG, ">>> authenticate() START - username='%s', password='%s'", username.c_str(), password.c_str());
 
-  // for (User _user : _state.users)
-  // {
-  //   if (_user.username == username && _user.password == password)
-  //   {
-  //     return Authentication(_user);
-  //   }
-  // }
-
-  if (username == "admin" && password == "12345678")
+  ESP_LOGI(TAG, ">>> authenticate: Checking if admin (admin/12345678)");
+  if (username == "admin" && password == "12345678") {
+    ESP_LOGI(TAG, ">>> authenticate: MATCH! Admin authenticated");
     return Authentication(username);
-  if (username == "service" && password == "1234")
-    return Authentication(username);
+  }
+  ESP_LOGI(TAG, ">>> authenticate: Not admin, checking service (service/1234)");
 
+  if (username == "service" && password == "1234") {
+    ESP_LOGI(TAG, ">>> authenticate: MATCH! Service authenticated");
+    return Authentication(username);
+  }
+  ESP_LOGI(TAG, ">>> authenticate: No match! Credentials invalid");
+
+  ESP_LOGW(TAG, ">>> authenticate: FAILED for username: '%s' - returning empty Authentication", username.c_str());
   return Authentication();
 }
 
@@ -146,7 +149,7 @@ inline void populateJWTPayload(JsonObject &payload, String username)
 
 boolean SecurityService::validatePayload(JsonObject &parsedPayload, String username)
 {
-  DynamicJsonDocument jsonDocument(MAX_JWT_SIZE);
+  JsonDocument jsonDocument;
   JsonObject payload = jsonDocument.to<JsonObject>();
   populateJWTPayload(payload, username);
   return payload == parsedPayload;
@@ -154,7 +157,7 @@ boolean SecurityService::validatePayload(JsonObject &parsedPayload, String usern
 
 String SecurityService::generateJWT(String username)
 {
-  DynamicJsonDocument jsonDocument(MAX_JWT_SIZE);
+  JsonDocument jsonDocument;
   JsonObject payload = jsonDocument.to<JsonObject>();
   populateJWTPayload(payload, username);
   return _jwtHandler.buildJWT(payload);

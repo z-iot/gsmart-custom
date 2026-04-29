@@ -39,15 +39,44 @@ public:
   }
 };
 
+namespace {
+class ConfigConnectHandler : public esphome::web_server_idf::AsyncWebHandler {
+ public:
+  ConfigConnectHandler(ConfigConnect *handler) : handler_(handler) {}
+
+  bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_POST) return false;
+    char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url_buf) == ConfigConnect_PATH;
+  }
+
+
+  void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
+    // Body will be handled by handleBody
+  }
+
+  void handleBody(esphome::web_server_idf::AsyncWebServerRequest *request, uint8_t *data, size_t len,
+                  size_t index, size_t total) override {
+    if (index == 0) body_.clear();
+    body_.append((char *)data, len);
+    if (index + len == total) {
+      esphome::json::parse_json(body_, [this, request](JsonObject root) {
+        this->handler_->post(request);
+        return true;
+      });
+    }
+  }
+
+ private:
+  ConfigConnect *handler_;
+  std::string body_;
+};
+}  // namespace
+
 ConfigConnect::ConfigConnect(std::shared_ptr<AsyncWebServer> server)
 {
   server->on(ConfigConnect_PATH, HTTP_GET, std::bind(&ConfigConnect::get, this, std::placeholders::_1));
-  server->on(ConfigConnect_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
-    esphome::json::parse_json(request->getBody(), [this, request](JsonObject root) {
-      this->post(request);
-      return true;
-    });
-  });
+  server->addHandler(new ConfigConnectHandler(this));
 }
 
 void ConfigConnect::get(AsyncWebServerRequest *request)
@@ -56,15 +85,15 @@ void ConfigConnect::get(AsyncWebServerRequest *request)
   std::string data = esphome::json::build_json([](JsonObject root){
       root["enable"] = true;
 
-      JsonObject ap = root.createNestedObject("ap");
+      JsonObject ap = root["ap"].to<JsonObject>();
       ap["enabled"] = true;
       ap["ssid"] = "promos-AP";
       ap["password"] = "123456";
-      JsonObject client = root.createNestedObject("client");
+      JsonObject client = root["client"].to<JsonObject>();
       client["enabled"] = true;
       client["ssid"] = "promos";
       client["password"] = "654321";
-      JsonObject time = root.createNestedObject("time");
+      JsonObject time = root["time"].to<JsonObject>();
       time["enabled"] = FACTORY_Connect_enabled;
       time["server"] = FACTORY_Connect_server;
       time["tz_label"] = FACTORY_Connect_tz_label;

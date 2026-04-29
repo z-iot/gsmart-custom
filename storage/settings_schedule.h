@@ -52,10 +52,10 @@ namespace esphome
         if (!this->enabled)
           root["enabled"] = this->enabled;
 
-        JsonArray arr = root.createNestedArray("frames");
+        JsonArray arr = root["frames"].to<JsonArray>();
         for (auto &item : this->schedule)
         {
-          JsonObject arrItem = arr.createNestedObject();
+          JsonObject arrItem = arr.add<JsonObject>();
           arrItem["d"] = convertWeekDayFromUsaToSk(item.day);
           if (item.mode == ScheduleMode::MIN)
             arrItem["m"] = "m";

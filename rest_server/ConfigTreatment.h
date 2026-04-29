@@ -8,8 +8,6 @@
 class ConfigTreatment {
  public:
   ConfigTreatment(std::shared_ptr<AsyncWebServer> server);
-
- private:
   void get(AsyncWebServerRequest* request);
   void post(AsyncWebServerRequest* request);
 };

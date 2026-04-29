@@ -39,6 +39,7 @@ namespace esphome
             ArRequestHandlerFunction requestHandler = [contentType, content, len](AsyncWebServerRequest *request)
             {
               AsyncWebServerResponse *response = request->beginResponse(200, contentType.c_str(), content, len);
+              response->addHeader("Content-Encoding", "gzip");
               request->send(response);
             };
 
@@ -67,25 +68,26 @@ namespace esphome
       // STM32OTA
       this->base_->add_handler(new stm32::STM32OTARequestHandler(this->base_));
 
-      // rest info
-      InfoFeature infoFeature = InfoFeature(server);
-      InfoSystem infoSystem = InfoSystem(server);
-      InfoNeighborhood infoNeighborhood = InfoNeighborhood(server);
+      // rest info — must be heap-allocated; handlers bind `this` and would dangle
+      // if these were stack locals destroyed when setupServer() returns.
+      new InfoFeature(server);
+      new InfoSystem(server);
+      new InfoNeighborhood(server);
       // rest config
-      ConfigDevice configDevice = ConfigDevice(server);
-      ConfigScheduller configScheduller = ConfigScheduller(server);
-      ConfigMode configMode = ConfigMode(server);
-      ConfigTreatment configTreatment = ConfigTreatment(server);
-      ConfigConnect configConnect = ConfigConnect(server);
-      ConfigSecurity configSecurity = ConfigSecurity(server);
-      ConfigConsumable configConsumable = ConfigConsumable(server);
+      new ConfigDevice(server);
+      new ConfigScheduller(server);
+      new ConfigMode(server);
+      new ConfigTreatment(server);
+      new ConfigConnect(server);
+      new ConfigSecurity(server);
+      new ConfigConsumable(server);
 
-      ConfigDef configDef = ConfigDef(server);
-      ConfigData configData = ConfigData(server);
+      new ConfigDef(server);
+      new ConfigData(server);
 
 
       SecurityService *securityService = new SecurityService(server);
-      AuthenticationService *authenticationService = new AuthenticationService(server, securityService);
+      new AuthenticationService(server, securityService);
 
 
 #if defined(ENABLE_CORS)

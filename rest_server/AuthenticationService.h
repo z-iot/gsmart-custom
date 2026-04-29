@@ -23,15 +23,13 @@ public:
 
   boolean validatePayload(JsonObject &parsedPayload, String username);
   String generateJWT(String username);
+  void signIn(AsyncWebServerRequest *request, JsonVariant &json);
+  void verifyAuthorization(AsyncWebServerRequest *request);
 
 private:
   ArduinoJsonJWT *jwt = new ArduinoJsonJWT(FACTORY_JWT_SECRET);
   SecurityManager *_securityManager;
   // AsyncCallbackJsonWebHandler _signInHandler;
-
-  // endpoint functions
-  void signIn(AsyncWebServerRequest *request, JsonVariant &json);
-  void verifyAuthorization(AsyncWebServerRequest *request);
 };
 
 #endif // end SecurityManager_h

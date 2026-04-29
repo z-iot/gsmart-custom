@@ -10,19 +10,19 @@ void ConfigSecurity::get(AsyncWebServerRequest* request) {
 
   std::string data =  esphome::json::build_json([](JsonObject root) {
 
-      JsonObject users = root.createNestedObject("users");
+      JsonObject users = root["users"].to<JsonObject>();
 
-      JsonObject guest = users.createNestedObject("guest");
+      JsonObject guest = users["guest"].to<JsonObject>();
       guest["username"] = "guest";
       guest["password"] = "xxxsdgwer";
       guest["role"] = "guest";
       guest["email"] = "guest@promos.company";
-      JsonObject user = users.createNestedObject("user");
+      JsonObject user = users["user"].to<JsonObject>();
       user["username"] = "user";
       user["password"] = "xxxsdgwer";
       user["role"] = "user";
       user["email"] = "user@promos.company";
-      JsonObject admin = users.createNestedObject("admin");
+      JsonObject admin = users["admin"].to<JsonObject>();
       admin["username"] = "admin";
       admin["password"] = "xxxsdgwer";
       admin["role"] = "admin";

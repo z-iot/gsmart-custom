@@ -12,74 +12,74 @@ void ConfigDef::get(AsyncWebServerRequest *request)
 
   // std::string data =  esphome::json::build_json([](JsonObject root) {
 
-  // JsonArray permissions = root.createNestedArray("permissions");
+  // JsonArray permissions = root["permissions"].to<JsonArray>();
 
-  // JsonArray classes = root.createNestedArray("classes");
+  // JsonArray classes = root["classes"].to<JsonArray>();
   // JsonObject c;
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Network";
   // c["code"] = "network";
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Region";
   // c["code"] = "region";
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Actuator";
   // c["code"] = "actuator";
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Emitter";
   // c["code"] = "emitter";
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Security";
   // c["code"] = "security";
 
-  // c = classes.createNestedObject();
+  // c = classes.add<JsonObject>();
   // c["title"] = "Setup";
   // c["code"] = "setup";
 
-  // JsonArray items = root.createNestedArray("items");
+  // JsonArray items = root["items"].to<JsonArray>();
   // JsonObject i;
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "wifi login";
   // i["code"] = "wifi_login";
   // i["class"] = "network";
   // i["permission"] = "true";
   // i["kind"] = "string";
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "ap login";
   // i["code"] = "ap_login";
   // i["class"] = "network";
   // i["permission"] = "true";
   // i["kind"] = "string";
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "wifi ap enable";
   // i["code"] = "wifi_ap_enable";
   // i["class"] = "network";
   // i["permission"] = "true";
   // i["kind"] = "boolean";
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "timeZone";
   // i["code"] = "timeZone";
   // i["class"] = "network";
   // i["permission"] = "true";
   // i["kind"] = "string";
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "group num";
   // i["code"] = "group_num";
   // i["class"] = "region";
   // i["permission"] = "true";
   // i["kind"] = "number";
 
-  // i = items.createNestedObject();
+  // i = items.add<JsonObject>();
   // i["title"] = "group name";
   // i["code"] = "group_name";
   // i["class"] = "region";

@@ -2,18 +2,45 @@
 #include "esphome/components/storage/store.h"
 // #include "esphome/components/storage/settings_schedule.h"
 
+namespace {
+class ConfigSchedullerHandler : public esphome::web_server_idf::AsyncWebHandler {
+ public:
+  ConfigSchedullerHandler(ConfigScheduller *handler) : handler_(handler) {}
+
+  bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
+    if (request->method() != HTTP_POST) return false;
+    char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url_buf) == ConfigScheduller_PATH;
+  }
+
+
+  void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
+    // Body will be handled by handleBody
+  }
+
+  void handleBody(esphome::web_server_idf::AsyncWebServerRequest *request, uint8_t *data, size_t len,
+                  size_t index, size_t total) override {
+    if (index == 0) body_.clear();
+    body_.append((char *)data, len);
+    if (index + len == total) {
+      esphome::json::parse_json(body_, [this, request](JsonObject root) {
+        JsonVariant json = root;
+        this->handler_->post(request, json);
+        return true;
+      });
+    }
+  }
+
+ private:
+  ConfigScheduller *handler_;
+  std::string body_;
+};
+}  // namespace
 
 ConfigScheduller::ConfigScheduller(std::shared_ptr<AsyncWebServer> server)
 {
   server->on(ConfigScheduller_PATH, HTTP_GET, std::bind(&ConfigScheduller::get, this, std::placeholders::_1));
-  
-  server->on(ConfigScheduller_PATH, HTTP_POST, [this](AsyncWebServerRequest *request) {
-    esphome::json::parse_json(request->getBody(), [this, request](JsonObject root) {
-      JsonVariant json = root;
-      this->post(request, json);
-      return true;
-    });
-  });
+  server->addHandler(new ConfigSchedullerHandler(this));
 }
 
 void ConfigScheduller::get(AsyncWebServerRequest *request)

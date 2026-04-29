@@ -16,7 +16,10 @@ public:
                     bool final) override;
   bool canHandle(AsyncWebServerRequest *request) const override
   {
-    return request->url() == "/updatestm" && request->method() == HTTP_POST;
+    if (request->method() != HTTP_POST)
+      return false;
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    return request->url_to(url_buf) == "/updatestm";
   }
 
   bool isRequestHandlerTrivial() const override { return false; }

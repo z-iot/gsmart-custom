@@ -38,11 +38,11 @@ namespace esphome
 
       void toJson(JsonObject &root) override
       {
-        JsonObject modeItem = root.createNestedObject("min");
+        JsonObject modeItem = root["min"].to<JsonObject>();
         toJsonOneMode(modeItem, modes.items[0]);
-        modeItem = root.createNestedObject("std");
+        modeItem = root["std"].to<JsonObject>();
         toJsonOneMode(modeItem, modes.items[1]);
-        modeItem = root.createNestedObject("max");
+        modeItem = root["max"].to<JsonObject>();
         toJsonOneMode(modeItem, modes.items[2]);
       }
 

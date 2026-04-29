@@ -31,7 +31,7 @@ namespace esphome
 
       bool loadFromFile()
       {
-        DynamicJsonDocument doc = DynamicJsonDocument(DEFAULT_BUFFER_SIZE);
+        JsonDocument doc;
         if (!fileSystem->readFromFS(fileName.c_str(), doc))
           return false;
         auto root = doc.as<JsonObject>();
@@ -41,7 +41,7 @@ namespace esphome
 
       bool saveToFile()
       {
-        DynamicJsonDocument jsonDocument = DynamicJsonDocument(DEFAULT_BUFFER_SIZE);
+        JsonDocument jsonDocument;
         auto root = jsonDocument.to<JsonObject>();
         toJson(root);
         return fileSystem->writeToFS(fileName.c_str(), root);
