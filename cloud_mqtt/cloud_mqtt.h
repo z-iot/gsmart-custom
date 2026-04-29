@@ -5,6 +5,7 @@
 #ifdef USE_MQTT
 
 #include "esphome/core/component.h"
+#include "esphome/components/mqtt/custom_mqtt_device.h"
 #include "esphome/components/mqtt/mqtt_client.h"
 
 #include <string>
@@ -26,7 +27,7 @@ class CloudCmdListener {
   std::string cmd_topic_{};
 };
 
-class CloudMqtt : public Component {
+class CloudMqtt : public Component, public mqtt::CustomMQTTDevice {
  public:
   void setup() override;
   void loop() override;
@@ -56,15 +57,19 @@ class CloudMqtt : public Component {
  protected:
   void configure_mqtt_client_();
   void subscribe_device_commands_();
+  void on_device_command_(const std::string &topic, const std::string &payload);
   void processDeviceCommand(std::string topic, std::string cmd);
 
   std::string topic_base_{};
+  std::string device_command_topic_prefix_{};
   bool configured_{false};
   bool device_commands_subscribed_{false};
   std::vector<CloudCmdListener *> cmd_device_listeners_;
 
 #ifdef GSMART_FEATURE_REGION
+  void on_region_command_(const std::string &topic, const std::string &payload);
   void processRegionCommand(std::string topic, std::string cmd);
+  std::string region_command_topic_prefix_{};
   std::vector<CloudCmdListener *> cmd_region_listeners_;
 #endif
 };

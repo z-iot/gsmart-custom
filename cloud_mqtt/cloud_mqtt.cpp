@@ -58,7 +58,6 @@ void CloudMqtt::configure_mqtt_client_() {
     return;
   }
 
-  mqtt::global_mqtt_client->set_topic_prefix(this->topic_base_, "");
   mqtt::global_mqtt_client->set_birth_message(mqtt::MQTTMessage{
       .topic = this->getCloudTopic("status"),
       .payload = "online",
@@ -91,16 +90,20 @@ void CloudMqtt::subscribe_device_commands_() {
   if (mqtt::global_mqtt_client == nullptr || this->device_commands_subscribed_)
     return;
 
-  const std::string topic_base = this->getCloudTopic("cmd/");
-  ESP_LOGD(TAG, "Subscribe to device topic: %s", (topic_base + "#").c_str());
-  mqtt::global_mqtt_client->subscribe(
-      topic_base + "#", [this, topic_base](const std::string &topic, const std::string &payload) {
-        std::string t = topic.substr(topic_base.length());
-        ESP_LOGD(TAG, "Received device cmd topic: %s, payload: %s", t.c_str(), payload.c_str());
-        this->defer([this, t, payload]() { this->processDeviceCommand(t, payload); });
-      });
+  this->device_command_topic_prefix_ = this->getCloudTopic("cmd/");
+  ESP_LOGD(TAG, "Subscribe to device topic: %s", (this->device_command_topic_prefix_ + "#").c_str());
+  this->subscribe(this->device_command_topic_prefix_ + "#", &CloudMqtt::on_device_command_);
 
   this->device_commands_subscribed_ = true;
+}
+
+void CloudMqtt::on_device_command_(const std::string &topic, const std::string &payload) {
+  if (topic.compare(0, this->device_command_topic_prefix_.length(), this->device_command_topic_prefix_) != 0)
+    return;
+
+  std::string t = topic.substr(this->device_command_topic_prefix_.length());
+  ESP_LOGD(TAG, "Received device cmd topic: %s, payload: %s", t.c_str(), payload.c_str());
+  this->defer([this, t, payload]() { this->processDeviceCommand(t, payload); });
 }
 
 void CloudMqtt::processDeviceCommand(std::string topic, std::string payload) {
@@ -141,19 +144,23 @@ void CloudMqtt::regionSubscribe(std::string region_serial) {
   if (region_serial.empty() || mqtt::global_mqtt_client == nullptr)
     return;
 
-  std::string topic_base = "region/" + region_serial + "/cmd/";
-  ESP_LOGD(TAG, "Subscribe to region topic: %s", (topic_base + "#").c_str());
-  mqtt::global_mqtt_client->subscribe(
-      topic_base + "#", [this, topic_base](const std::string &topic, const std::string &payload) {
-        std::string t = topic.substr(topic_base.length());
-        this->defer([this, t, payload]() { this->processRegionCommand(t, payload); });
-      });
+  this->region_command_topic_prefix_ = "region/" + region_serial + "/cmd/";
+  ESP_LOGD(TAG, "Subscribe to region topic: %s", (this->region_command_topic_prefix_ + "#").c_str());
+  this->subscribe(this->region_command_topic_prefix_ + "#", &CloudMqtt::on_region_command_);
 }
 
 void CloudMqtt::regionUnsubscribe(std::string region_serial) {
   if (region_serial.empty() || mqtt::global_mqtt_client == nullptr)
     return;
   mqtt::global_mqtt_client->unsubscribe("region/" + region_serial + "/cmd/#");
+}
+
+void CloudMqtt::on_region_command_(const std::string &topic, const std::string &payload) {
+  if (topic.compare(0, this->region_command_topic_prefix_.length(), this->region_command_topic_prefix_) != 0)
+    return;
+
+  std::string t = topic.substr(this->region_command_topic_prefix_.length());
+  this->defer([this, t, payload]() { this->processRegionCommand(t, payload); });
 }
 #endif
 
