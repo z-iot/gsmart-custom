@@ -37,6 +37,23 @@ std::string normalize_token(std::string value) {
   return value;
 }
 
+std::string normalize_mac_token(std::string value) {
+  std::string normalized;
+  normalized.reserve(value.size());
+  for (char ch : value) {
+    if (ch == ':' || ch == '-' || ch == ' ')
+      continue;
+    normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  return normalized;
+}
+
+std::string local_mac_string() {
+  uint8_t mac[6];
+  get_mac_address_raw(mac);
+  return storage::convertMacToStr(mac);
+}
+
 std::string radiation_mode_to_api(storage::RadiationMode mode) {
   switch (mode) {
     case storage::RadiationMode::MIN:
@@ -197,6 +214,115 @@ void add_situation(JsonObject root) {
   root["nextTotalSec"] = situation.NextTotalSec;
 }
 
+void add_lamps_status(JsonObject root) {
+  root["lampState"] = false;
+  root["lampStateA"] = false;
+  root["lampStateB"] = false;
+
+  JsonArray lamps = root["lamps"].to<JsonArray>();
+
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  int lamp_count = storage::store->usage->beam.pref.lampCount;
+  if (lamp_count < 0 || lamp_count > DEVICE_MAX_LAMP)
+    lamp_count = DEVICE_MAX_LAMP;
+
+  bool any_lamp_on = false;
+  for (int i = 0; i < lamp_count; i++) {
+    const bool running = storage::store->usage->lamp[i].lastStart > storage::store->usage->lamp[i].lastStop;
+    any_lamp_on = any_lamp_on || running;
+
+    JsonObject lamp = lamps.add<JsonObject>();
+    lamp["channel"] = i + 1;
+    lamp["running"] = running;
+    lamp["onSec"] = storage::store->usage->lamp[i].pref.onSec;
+    lamp["startCount"] = storage::store->usage->lamp[i].pref.startCount;
+    lamp["stopCount"] = storage::store->usage->lamp[i].pref.stopCount;
+    lamp["lastStartSec"] = storage::store->usage->lamp[i].lastStart;
+    lamp["lastStopSec"] = storage::store->usage->lamp[i].lastStop;
+  }
+
+  root["lampState"] = any_lamp_on;
+  if (lamp_count > 0)
+    root["lampStateA"] = storage::store->usage->lamp[0].lastStart > storage::store->usage->lamp[0].lastStop;
+  if (lamp_count > 1)
+    root["lampStateB"] = storage::store->usage->lamp[1].lastStart > storage::store->usage->lamp[1].lastStop;
+#endif
+}
+
+void add_motion_status(JsonObject root) {
+  root["motion"] = false;
+
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  const bool motion = storage::store->usage->motion.lastStart > storage::store->usage->motion.lastStop;
+  root["motion"] = motion;
+
+  JsonObject motion_obj = root["motionInfo"].to<JsonObject>();
+  motion_obj["active"] = motion;
+  motion_obj["onSec"] = storage::store->usage->motion.onSec;
+  motion_obj["offSec"] = storage::store->usage->motion.offSec;
+  motion_obj["startCount"] = storage::store->usage->motion.startCount;
+  motion_obj["stopCount"] = storage::store->usage->motion.stopCount;
+  motion_obj["lastStartSec"] = storage::store->usage->motion.lastStart;
+  motion_obj["lastStopSec"] = storage::store->usage->motion.lastStop;
+#endif
+}
+
+void add_fans_status(JsonObject root) {
+  root["fanSpeedA"] = 0;
+  root["fanSpeedB"] = 0;
+
+  JsonArray fans = root["fans"].to<JsonArray>();
+
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  int fan_count = storage::store->usage->beam.pref.fanCount;
+  if (fan_count < 0 || fan_count > DEVICE_MAX_FAN)
+    fan_count = DEVICE_MAX_FAN;
+
+  for (int i = 0; i < fan_count; i++) {
+    const bool running = storage::store->usage->fan[i].lastStart > storage::store->usage->fan[i].lastStop;
+    JsonObject fan = fans.add<JsonObject>();
+    fan["channel"] = i + 1;
+    fan["running"] = running;
+    fan["speed"] = 0;
+    fan["rotationCount"] = storage::store->usage->fan[i].rotationCount;
+    fan["onSec"] = storage::store->usage->fan[i].onSec;
+    fan["startCount"] = storage::store->usage->fan[i].startCount;
+    fan["stopCount"] = storage::store->usage->fan[i].stopCount;
+    fan["lastStartSec"] = storage::store->usage->fan[i].lastStart;
+    fan["lastStopSec"] = storage::store->usage->fan[i].lastStop;
+  }
+#endif
+}
+
+void add_error_status(JsonObject root) {
+  JsonObject errors = root["errors"].to<JsonObject>();
+  errors["count"] = 0;
+  errors["lastCode"] = 0;
+  errors["lastMessage"] = "";
+  errors["hasError"] = false;
+
+#ifdef GSMART_FEATURE_USAGE
+  errors["count"] = storage::store->usage->error.totalCount;
+  errors["lastCode"] = storage::store->usage->error.lastCode;
+  errors["lastMessage"] = storage::store->usage->error.lastDesc;
+  errors["hasError"] = storage::store->usage->error.totalCount > 0;
+#endif
+
+  JsonArray warnings = root["warnings"].to<JsonArray>();
+  if (storage::store->global->isGuardDurationOverflow()) {
+    JsonObject warning = warnings.add<JsonObject>();
+    warning["code"] = "guard_duration_overflow";
+    warning["message"] = "Radiation guard duration has been exceeded.";
+  }
+#ifdef GSMART_FEATURE_USAGE
+  if (storage::store->usage->error.totalCount > 0) {
+    JsonObject warning = warnings.add<JsonObject>();
+    warning["code"] = "device_error";
+    warning["message"] = storage::store->usage->error.lastDesc;
+  }
+#endif
+}
+
 void build_info(JsonObject root) {
   uint8_t mac[6];
   get_mac_address_raw(mac);
@@ -243,6 +369,8 @@ void build_info(JsonObject root) {
 
 void build_status(JsonObject root) {
   const auto active_mode = storage::store->global->radiation.activeMode;
+  root["model"] = storage::store->get_model();
+  root["serial"] = storage::store->get_serial();
   root["mode"] = radiation_mode_to_api(active_mode);
   root["radiate"] = active_mode != storage::RadiationMode::NONE;
   root["source"] = radiation_source_to_api(storage::store->global->radiation.lastSource);
@@ -252,6 +380,10 @@ void build_status(JsonObject root) {
   root["uptimeSec"] = millis() / 1000;
 
   add_wifi_runtime(root);
+  add_lamps_status(root);
+  add_motion_status(root);
+  add_fans_status(root);
+  add_error_status(root);
 
   JsonObject situation = root["situation"].to<JsonObject>();
   add_situation(situation);
@@ -262,6 +394,74 @@ void build_status(JsonObject root) {
   region["isMaster"] = storage::store->region->isMaster();
   region["selfIndex"] = storage::store->region->selfIndex;
   region["masterIndex"] = storage::store->region->layout.masterIndex;
+#endif
+}
+
+void build_diagnostics(JsonObject root) {
+  root["model"] = storage::store->get_model();
+  root["serial"] = storage::store->get_serial();
+  root["uptimeSec"] = millis() / 1000;
+
+  JsonObject memory = root["memory"].to<JsonObject>();
+  memory["freeHeap"] = ESP.getFreeHeap();
+#ifdef ESP32
+  memory["maxAllocHeap"] = ESP.getMaxAllocHeap();
+  memory["psramSize"] = ESP.getPsramSize();
+  memory["freePsram"] = ESP.getFreePsram();
+#elif defined(ESP8266)
+  memory["maxAllocHeap"] = ESP.getMaxFreeBlockSize();
+  memory["heapFragmentation"] = ESP.getHeapFragmentation();
+#endif
+
+  JsonObject firmware = root["firmware"].to<JsonObject>();
+#ifdef ESP32
+  firmware["platform"] = "esp32";
+#elif defined(ESP8266)
+  firmware["platform"] = "esp8266";
+#else
+  firmware["platform"] = "unknown";
+#endif
+  firmware["cpuFreqMhz"] = ESP.getCpuFreqMHz();
+  firmware["sketchSize"] = ESP.getSketchSize();
+  firmware["freeSketchSpace"] = ESP.getFreeSketchSpace();
+  firmware["sdkVersion"] = ESP.getSdkVersion();
+  firmware["flashChipSize"] = ESP.getFlashChipSize();
+  firmware["flashChipSpeed"] = ESP.getFlashChipSpeed();
+
+  JsonObject filesystem = root["filesystem"].to<JsonObject>();
+#ifdef GSMART_FEATURE_FILESYSTEM
+  filesystem["enabled"] = true;
+  filesystem["total"] = storage::store->fileSystem->GetTotalBytes();
+  filesystem["used"] = storage::store->fileSystem->GetUsedBytes();
+#else
+  filesystem["enabled"] = false;
+  filesystem["total"] = 0;
+  filesystem["used"] = 0;
+#endif
+
+  JsonObject wifi = root["wifi"].to<JsonObject>();
+  add_wifi_runtime(wifi);
+
+  add_lamps_status(root);
+  add_motion_status(root);
+  add_fans_status(root);
+  add_error_status(root);
+
+  JsonArray relays = root["relays"].to<JsonArray>();
+  JsonArray triacs = root["triacs"].to<JsonArray>();
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  int lamp_count = storage::store->usage->beam.pref.lampCount;
+  if (lamp_count < 0 || lamp_count > DEVICE_MAX_LAMP)
+    lamp_count = DEVICE_MAX_LAMP;
+  for (int i = 0; i < lamp_count; i++) {
+    JsonObject relay = relays.add<JsonObject>();
+    relay["channel"] = i + 1;
+    relay["diagnosticAvailable"] = false;
+
+    JsonObject triac = triacs.add<JsonObject>();
+    triac["channel"] = i + 1;
+    triac["diagnosticAvailable"] = false;
+  }
 #endif
 }
 
@@ -441,6 +641,108 @@ void ping_region(JsonObject root) {
 #endif
 }
 
+IdentifyRequest identify_request_from_json(JsonObject root) {
+  IdentifyRequest request;
+  request.target_mac = json_string(root["targetMac"]);
+  request.pattern = json_string(root["pattern"], "default");
+  request.sound = json_string(root["sound"], "identify");
+  request.sound_enabled = json_bool(root["sound"], true);
+  request.light = json_bool(root["light"], true);
+  if (!root["durationSec"].isNull())
+    request.duration_sec = root["durationSec"].as<uint32_t>();
+  else if (!root["duration"].isNull())
+    request.duration_sec = root["duration"].as<uint32_t>();
+  if (request.duration_sec == 0)
+    request.duration_sec = 3;
+  return request;
+}
+
+bool identify_target_matches_this_device(const IdentifyRequest &identify) {
+  if (identify.target_mac.empty())
+    return true;
+  return normalize_mac_token(identify.target_mac) == normalize_mac_token(local_mac_string());
+}
+
+void handle_control_mode(AsyncWebServerRequest *request, JsonObject root) {
+  if (root["mode"].isNull()) {
+    send_error(request, 400, "invalid_mode", "Missing required field: mode.");
+    return;
+  }
+
+  const auto mode = radiation_mode_from_api(root["mode"]);
+  const std::string scope = normalize_token(json_string(root["scope"], "device"));
+
+  if (scope == "device" || scope.empty()) {
+    storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
+    send_ok(request, [mode](JsonObject response) {
+      response["mode"] = radiation_mode_to_api(mode);
+      response["scope"] = "device";
+      response["applied"] = "device";
+    });
+    return;
+  }
+
+  if (scope != "region") {
+    send_error(request, 400, "invalid_scope", "Supported scopes are device and region.");
+    return;
+  }
+
+#ifndef GSMART_FEATURE_REGION
+  send_error(request, 501, "region_not_available", "Region feature is not enabled in this firmware.");
+  return;
+#elif !defined(USE_UDPSERVER)
+  send_error(request, 501, "region_transport_not_available", "UDP region transport is not enabled in this firmware.");
+  return;
+#else
+  if (!storage::store->region->isRegionActive()) {
+    send_error(request, 409, "region_not_active", "Device is not assigned to an active region.");
+    return;
+  }
+
+  if (!storage::store->region->isMaster()) {
+    send_error(request, 409, "not_region_master", "Only the region master can control the whole region.");
+    return;
+  }
+
+  if (udp_server::udpServer == nullptr) {
+    send_error(request, 503, "region_transport_not_ready", "UDP region transport is not ready.");
+    return;
+  }
+
+  storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
+  udp_server::udpServer->sendControlRadiation(mode, udp_server::KindRadiationSource::SOURCE_EXT);
+
+  send_ok(request, [mode](JsonObject response) {
+    response["mode"] = radiation_mode_to_api(mode);
+    response["scope"] = "region";
+    response["applied"] = "region";
+    response["sent"] = true;
+    response["master"] = true;
+    response["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+  });
+#endif
+}
+
+void handle_identify(MobileApi *api, AsyncWebServerRequest *request, JsonObject root) {
+  IdentifyRequest identify = identify_request_from_json(root);
+  if (!identify_target_matches_this_device(identify)) {
+    send_error(request, 409, "target_mismatch", "targetMac does not match this device.");
+    return;
+  }
+
+  api->trigger_identify(identify);
+
+  send_ok(request, [identify](JsonObject response) {
+    response["triggered"] = true;
+    response["targetMac"] = identify.target_mac;
+    response["pattern"] = identify.pattern;
+    response["durationSec"] = identify.duration_sec;
+    response["sound"] = identify.sound;
+    response["soundEnabled"] = identify.sound_enabled;
+    response["light"] = identify.light;
+  });
+}
+
 }  // namespace
 
 void MobileApi::setup() {
@@ -450,7 +752,7 @@ void MobileApi::setup() {
 
   register_json_get(server, api_uri("/info"), build_info);
   register_json_get(server, api_uri("/status"), build_status);
-  register_json_get(server, api_uri("/diagnostics"), &gs::payloads::system_info_json);
+  register_json_get(server, api_uri("/diagnostics"), build_diagnostics);
   register_json_get(server, api_uri("/consumption"), build_consumption);
 
   register_json_get(server, api_uri("/network"), build_network);
@@ -461,15 +763,10 @@ void MobileApi::setup() {
   register_json_get(server, api_uri("/network/mqtt"), build_mqtt);
   register_post_not_implemented(server, api_uri("/network/mqtt"), "MQTT settings storage is not implemented yet.");
 
-  register_json_post(server, api_uri("/control/mode"), [](AsyncWebServerRequest *request, JsonObject root) {
-    const auto mode = radiation_mode_from_api(root["mode"]);
-    storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
-    send_ok(request, [mode](JsonObject response) {
-      response["mode"] = radiation_mode_to_api(mode);
-      response["scope"] = "device";
-    });
+  register_json_post(server, api_uri("/control/mode"), handle_control_mode);
+  register_json_post(server, api_uri("/control/identify"), [this](AsyncWebServerRequest *request, JsonObject root) {
+    handle_identify(this, request, root);
   });
-  register_post_not_implemented(server, api_uri("/control/identify"), "Device identify action is not implemented yet.");
 
   register_json_get(server, api_uri("/scheduler"), &gs::payloads::scheduller_json);
   register_json_post(server, api_uri("/scheduler"), [](AsyncWebServerRequest *request, JsonObject root) {
