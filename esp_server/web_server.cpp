@@ -451,6 +451,43 @@ void WebServer::dump_config() {
                 "  Address: %s:%u",
                 network::get_use_address(), this->base_->get_port());
 }
+
+void WebServer::close_event_sources(const char *reason) {
+#ifdef USE_ESP32
+  this->events_.close_all(reason);
+#elif !defined(USE_ESP32) && defined(USE_ARDUINO)
+  ESP_LOGW(TAG, "Closing EventSource clients is only implemented for ESP32 in this build");
+#else
+  (void) reason;
+#endif
+}
+
+size_t WebServer::get_event_source_count() const {
+#ifdef USE_ESP32
+  return this->events_.active_count();
+#elif !defined(USE_ESP32) && defined(USE_ARDUINO)
+  return this->events_.size();
+#else
+  return 0;
+#endif
+}
+
+size_t WebServer::get_event_source_deferred_count() const {
+#ifdef USE_ESP32
+  return this->events_.deferred_count();
+#else
+  return 0;
+#endif
+}
+
+size_t WebServer::get_event_source_buffered_bytes() const {
+#ifdef USE_ESP32
+  return this->events_.buffered_bytes();
+#else
+  return 0;
+#endif
+}
+
 float WebServer::get_setup_priority() const { return setup_priority::WIFI - 1.0f; }
 
 // #ifdef USE_WEBSERVER_LOCAL

@@ -8,6 +8,8 @@
 
 #define VERIFY_AUTHORIZATION_PATH "/api/mobile/v1/me"
 #define SIGN_IN_PATH "/api/mobile/v1/signin"
+#define LEGACY_VERIFY_AUTHORIZATION_PATH "/sec/me"
+#define LEGACY_SIGN_IN_PATH "/sec/signin"
 
 #define MAX_AUTHENTICATION_SIZE 256
 

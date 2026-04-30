@@ -252,6 +252,11 @@ class WebServer : public Controller, public Component, public AsyncWebHandler {
   void on_log(uint8_t level, const char *tag, const char *message, size_t message_len);
 #endif
 
+  void close_event_sources(const char *reason);
+  size_t get_event_source_count() const;
+  size_t get_event_source_deferred_count() const;
+  size_t get_event_source_buffered_bytes() const;
+
   /// MQTT setup priority.
   float get_setup_priority() const override;
 

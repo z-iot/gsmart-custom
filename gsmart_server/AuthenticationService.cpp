@@ -16,7 +16,7 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
     if (request->method() != HTTP_POST) return false;
     char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
     auto url = request->url_to(url_buf);
-    return (url == SIGN_IN_PATH);
+    return (url == SIGN_IN_PATH || url == LEGACY_SIGN_IN_PATH);
   }
 
   void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
@@ -45,6 +45,8 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
 AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> server, SecurityManager *securityManager) : _securityManager(securityManager)
 {
   esphome::gsmart_server::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+                             std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, LEGACY_VERIFY_AUTHORIZATION_PATH, HTTP_GET,
                              std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
   // Register sign-in handler

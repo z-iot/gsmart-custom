@@ -21,6 +21,8 @@ class EspServer : public WebServer {
  protected:
 };
 
+extern EspServer *global_esp_server;
+
 }  // namespace web_server
 }  // namespace esphome
 
