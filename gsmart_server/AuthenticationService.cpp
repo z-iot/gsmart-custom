@@ -1,7 +1,7 @@
 #include "AuthenticationService.h"
 #include "web_helpers.h"
 
-// AsyncWebHandler for /sec/signin POST with JSON body.
+// AsyncWebHandler for SIGN_IN_PATH POST with JSON body.
 // Body is consumed via handleBody (same pattern as Config* handlers) so we
 // don't depend on framework-internal storage of the POST body.
 class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {

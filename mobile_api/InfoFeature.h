@@ -3,13 +3,12 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 
-#define InfoSystem_PATH "/inf/system"
+#define InfoFeature_PATH "/api/mobile/v1/features"
 
-class InfoSystem {
+class InfoFeature {
  public:
-  InfoSystem(std::shared_ptr<AsyncWebServer> server);
+  InfoFeature(std::shared_ptr<AsyncWebServer> server);
 
  private:
   void get(AsyncWebServerRequest* request);
 };
-

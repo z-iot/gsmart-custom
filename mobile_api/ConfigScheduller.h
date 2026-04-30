@@ -4,7 +4,7 @@
 
 #include "esphome/components/json/json_util.h"
 
-#define ConfigScheduller_PATH "/cfg/scheduller"
+#define ConfigScheduller_PATH "/api/mobile/v1/scheduller"
 
 class ConfigScheduller {
  public:

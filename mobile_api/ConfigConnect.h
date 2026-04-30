@@ -2,13 +2,13 @@
 
 #include "esphome/components/web_server_base/web_server_base.h"
 
+#define ConfigConnect_PATH "/api/mobile/v1/connect"
 
-#define ConfigMode_PATH "/cfg/mode"
-
-class ConfigMode {
+class ConfigConnect {
  public:
-  ConfigMode(std::shared_ptr<AsyncWebServer> server);
+  ConfigConnect(std::shared_ptr<AsyncWebServer> server);
   void get(AsyncWebServerRequest* request);
   void post(AsyncWebServerRequest* request);
 };
+
 

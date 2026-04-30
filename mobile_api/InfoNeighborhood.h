@@ -3,7 +3,7 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 
-#define InfoNeighborhood_PATH "/inf/neighborhood"
+#define InfoNeighborhood_PATH "/api/mobile/v1/neighborhood"
 
 class InfoNeighborhood {
  public:

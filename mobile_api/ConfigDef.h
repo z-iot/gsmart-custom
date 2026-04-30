@@ -3,7 +3,7 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 
-#define ConfigDef_PATH "/cfg/def"
+#define ConfigDef_PATH "/api/mobile/v1/def"
 
 class ConfigDef {
  public:

@@ -3,11 +3,11 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 
-#define ConfigSecurity_PATH "/cfg/security"
+#define ConfigConsumable_PATH "/api/mobile/v1/consumable"
 
-class ConfigSecurity {
+class ConfigConsumable {
  public:
-  ConfigSecurity(std::shared_ptr<AsyncWebServer> server);
+  ConfigConsumable(std::shared_ptr<AsyncWebServer> server);
 
  private:
   void get(AsyncWebServerRequest* request);

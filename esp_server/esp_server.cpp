@@ -73,7 +73,7 @@ namespace esphome
         return true;
       if (url == "/")
         return false;
-      if (starts_with("/sec/", 5) || starts_with("/api/", 5) || starts_with("/rest/", 6))
+      if (starts_with("/api/", 5))
         return false;
       return WebServer::canHandle(request);
     }

@@ -3,11 +3,11 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 
-#define ConfigDevice_PATH "/cfg/device"
+#define ConfigMode_PATH "/api/mobile/v1/mode"
 
-class ConfigDevice {
+class ConfigMode {
  public:
-  ConfigDevice(std::shared_ptr<AsyncWebServer> server);
+  ConfigMode(std::shared_ptr<AsyncWebServer> server);
   void get(AsyncWebServerRequest* request);
   void post(AsyncWebServerRequest* request);
 };
