@@ -1,4 +1,5 @@
 #include "ConfigConnect.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 #define FACTORY_Connect_enabled true
@@ -75,7 +76,7 @@ class ConfigConnectHandler : public esphome::web_server_idf::AsyncWebHandler {
 
 ConfigConnect::ConfigConnect(std::shared_ptr<AsyncWebServer> server)
 {
-  server->on(ConfigConnect_PATH, HTTP_GET, std::bind(&ConfigConnect::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigConnect_PATH, HTTP_GET, std::bind(&ConfigConnect::get, this, std::placeholders::_1));
   server->addHandler(new ConfigConnectHandler(this));
 }
 

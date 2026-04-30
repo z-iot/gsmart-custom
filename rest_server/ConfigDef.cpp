@@ -1,10 +1,11 @@
 #include "ConfigDef.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 ConfigDef::ConfigDef(std::shared_ptr<AsyncWebServer> server)
 {
-  server->on(ConfigDef_PATH, HTTP_GET, std::bind(&ConfigDef::get, this, std::placeholders::_1));
-  server->on(ConfigDef_PATH, HTTP_POST, std::bind(&ConfigDef::post, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigDef_PATH, HTTP_GET, std::bind(&ConfigDef::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigDef_PATH, HTTP_POST, std::bind(&ConfigDef::post, this, std::placeholders::_1));
 }
 
 void ConfigDef::get(AsyncWebServerRequest *request)

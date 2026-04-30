@@ -1,9 +1,10 @@
 #include "ConfigSecurity.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 ConfigSecurity::ConfigSecurity(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigSecurity_PATH, HTTP_GET, std::bind(&ConfigSecurity::get, this, std::placeholders::_1));
-  server->on(ConfigSecurity_PATH, HTTP_POST, std::bind(&ConfigSecurity::post, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigSecurity_PATH, HTTP_GET, std::bind(&ConfigSecurity::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigSecurity_PATH, HTTP_POST, std::bind(&ConfigSecurity::post, this, std::placeholders::_1));
 }
 
 void ConfigSecurity::get(AsyncWebServerRequest* request) {

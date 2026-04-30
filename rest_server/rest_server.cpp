@@ -2,7 +2,6 @@
 
 #include "rest_server.h"
 // #include "esphome/core/application.h"
-#include "WWWData.h"
 
 #include "InfoFeature.h"
 #include "InfoSystem.h"
@@ -26,38 +25,8 @@ namespace esphome
     void RestServer::setupServer()
     {
       std::shared_ptr<AsyncWebServer> server(this->base_->get_server(), [](AsyncWebServer *) {});
-      // Serve static resources from PROGMEM
-      WWWData::registerRoutes(
-          [server, this](const String &uri, const String &contentType, const uint8_t *content, size_t len)
-          {
-            std::function<void(AsyncWebServerRequest *)> requestHandler =
-                [contentType, content, len](AsyncWebServerRequest *request)
-            {
-              AsyncWebServerResponse *response = request->beginResponse(200, contentType.c_str(), content, len);
-              response->addHeader("Content-Encoding", "gzip");
-              request->send(response);
-            };
 
-            // Serving non matching get requests with "/index.html"
-            // OPTIONS get a straight up 200 response
-            if (uri.equals("/index.html"))
-            {
-              server->onNotFound([requestHandler](AsyncWebServerRequest *request)
-                                 {
-                if (request->method() == HTTP_GET) {
-                  requestHandler(request);
-                } else if (request->method() == HTTP_OPTIONS) {
-                  request->send(200);
-                } else {
-                  request->send(404);
-                } });
-              server->on(uri.c_str(), HTTP_GET, std::move(requestHandler));
-            }
-            else
-            {
-              server->on(uri.c_str(), HTTP_GET, std::move(requestHandler));
-          }
-          });
+      // Static UI is now served by control_server. Auth/security by gsmart_server.
 
       // rest info — must be heap-allocated; handlers bind `this` and would dangle
       // if these were stack locals destroyed when setupServer() returns.
@@ -75,15 +44,6 @@ namespace esphome
 
       new ConfigDef(server);
       new ConfigData(server);
-
-      // Auth/security services are now owned by gsmart_server (which is
-      // AUTO_LOADed). No need to instantiate them here.
-
-#if defined(ENABLE_CORS)
-      DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
-      DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization");
-      DefaultHeaders::Instance().addHeader("Access-Control-Allow-Credentials", "true");
-#endif
     }
 
   }

@@ -1,11 +1,12 @@
 #include "InfoNeighborhood.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/settings_schedule.h"
 
 InfoNeighborhood::InfoNeighborhood(std::shared_ptr<AsyncWebServer> server)
 {
-  server->on(InfoNeighborhood_PATH, HTTP_GET, std::bind(&InfoNeighborhood::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, InfoNeighborhood_PATH, HTTP_GET, std::bind(&InfoNeighborhood::get, this, std::placeholders::_1));
 }
 
 void InfoNeighborhood::get(AsyncWebServerRequest *request)

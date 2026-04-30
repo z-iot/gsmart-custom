@@ -1,9 +1,10 @@
 #include "ConfigConsumable.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 ConfigConsumable::ConfigConsumable(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigConsumable_PATH, HTTP_GET, std::bind(&ConfigConsumable::get, this, std::placeholders::_1));
-  server->on(ConfigConsumable_PATH, HTTP_POST, std::bind(&ConfigConsumable::post, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigConsumable_PATH, HTTP_GET, std::bind(&ConfigConsumable::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigConsumable_PATH, HTTP_POST, std::bind(&ConfigConsumable::post, this, std::placeholders::_1));
 }
 
 void ConfigConsumable::get(AsyncWebServerRequest* request) {

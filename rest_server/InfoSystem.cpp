@@ -1,4 +1,5 @@
 #include "InfoSystem.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/settings_schedule.h"
@@ -6,7 +7,7 @@
 
 InfoSystem::InfoSystem(std::shared_ptr<AsyncWebServer> server)
 {
-  server->on(InfoSystem_PATH, HTTP_GET, std::bind(&InfoSystem::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, InfoSystem_PATH, HTTP_GET, std::bind(&InfoSystem::get, this, std::placeholders::_1));
 }
 
 void InfoSystem::get(AsyncWebServerRequest *request)

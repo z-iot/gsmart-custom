@@ -1,9 +1,10 @@
 #include "ConfigData.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 ConfigData::ConfigData(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigData_PATH, HTTP_GET, std::bind(&ConfigData::get, this, std::placeholders::_1));
-  server->on(ConfigData_PATH, HTTP_POST, std::bind(&ConfigData::post, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigData_PATH, HTTP_GET, std::bind(&ConfigData::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigData_PATH, HTTP_POST, std::bind(&ConfigData::post, this, std::placeholders::_1));
 }
 
 void ConfigData::get(AsyncWebServerRequest* request) {

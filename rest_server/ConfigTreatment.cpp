@@ -1,4 +1,5 @@
 #include "ConfigTreatment.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 namespace {
@@ -36,7 +37,7 @@ class ConfigTreatmentHandler : public esphome::web_server_idf::AsyncWebHandler {
 }  // namespace
 
 ConfigTreatment::ConfigTreatment(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigTreatment_PATH, HTTP_GET, std::bind(&ConfigTreatment::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigTreatment_PATH, HTTP_GET, std::bind(&ConfigTreatment::get, this, std::placeholders::_1));
   server->addHandler(new ConfigTreatmentHandler(this));
 }
 

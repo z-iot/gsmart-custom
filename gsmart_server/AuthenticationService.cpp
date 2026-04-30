@@ -1,4 +1,5 @@
 #include "AuthenticationService.h"
+#include "web_helpers.h"
 
 // AsyncWebHandler for /sec/signin POST with JSON body.
 // Body is consumed via handleBody (same pattern as Config* handlers) so we
@@ -43,7 +44,8 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
 
 AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> server, SecurityManager *securityManager) : _securityManager(securityManager)
 {
-  server->on(VERIFY_AUTHORIZATION_PATH, HTTP_GET, std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+                             std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
   // Register sign-in handler
   server->addHandler(new SignInHandler(this));
@@ -90,8 +92,7 @@ void AuthenticationService::signIn(AsyncWebServerRequest *request, JsonVariant &
       return;
     }
   }
-  AsyncWebServerResponse *response = request->beginResponse(401);
-  request->send(response);
+  request->send(401);
 }
 inline void populateJWTPayload(JsonObject &payload, String username)
 {

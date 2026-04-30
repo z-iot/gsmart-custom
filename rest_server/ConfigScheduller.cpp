@@ -1,4 +1,5 @@
 #include "ConfigScheduller.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/storage/store.h"
 // #include "esphome/components/storage/settings_schedule.h"
 
@@ -39,7 +40,7 @@ class ConfigSchedullerHandler : public esphome::web_server_idf::AsyncWebHandler 
 
 ConfigScheduller::ConfigScheduller(std::shared_ptr<AsyncWebServer> server)
 {
-  server->on(ConfigScheduller_PATH, HTTP_GET, std::bind(&ConfigScheduller::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigScheduller_PATH, HTTP_GET, std::bind(&ConfigScheduller::get, this, std::placeholders::_1));
   server->addHandler(new ConfigSchedullerHandler(this));
 }
 
@@ -75,6 +76,5 @@ void ConfigScheduller::post(AsyncWebServerRequest *request, JsonVariant &json)
     return;
   }
 
-  AsyncWebServerResponse *response = request->beginResponse(401);
-  request->send(response);
+  request->send(401);
 }

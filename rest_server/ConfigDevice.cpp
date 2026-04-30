@@ -1,4 +1,5 @@
 #include "ConfigDevice.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 namespace {
@@ -36,7 +37,7 @@ class ConfigDeviceHandler : public esphome::web_server_idf::AsyncWebHandler {
 }  // namespace
 
 ConfigDevice::ConfigDevice(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigDevice_PATH, HTTP_GET, std::bind(&ConfigDevice::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigDevice_PATH, HTTP_GET, std::bind(&ConfigDevice::get, this, std::placeholders::_1));
   server->addHandler(new ConfigDeviceHandler(this));
 }
 

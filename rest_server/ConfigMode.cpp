@@ -1,4 +1,5 @@
 #include "ConfigMode.h"
+#include "esphome/components/gsmart_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 namespace {
@@ -36,7 +37,7 @@ class ConfigModeHandler : public esphome::web_server_idf::AsyncWebHandler {
 }  // namespace
 
 ConfigMode::ConfigMode(std::shared_ptr<AsyncWebServer> server) {
-  server->on(ConfigMode_PATH, HTTP_GET, std::bind(&ConfigMode::get, this, std::placeholders::_1));
+  esphome::gsmart_server::on(server, ConfigMode_PATH, HTTP_GET, std::bind(&ConfigMode::get, this, std::placeholders::_1));
   server->addHandler(new ConfigModeHandler(this));
 }
 
