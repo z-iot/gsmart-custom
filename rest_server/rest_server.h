@@ -6,11 +6,6 @@
 #include "esphome/core/controller.h"
 #include "esphome/core/component.h"
 
-// web_server::handle_index_request
-//   stream->print(
-//           F("<h2>OTA Update STM32</h2><form method=\"POST\" action=\"/updatestm\" enctype=\"multipart/form-data\"><input "
-//             "type=\"file\" name=\"update\"><input type=\"submit\" value=\"Update\"></form>"));
-
 
 namespace esphome
 {

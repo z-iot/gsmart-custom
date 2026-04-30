@@ -4,8 +4,6 @@
 // #include "esphome/core/application.h"
 #include "WWWData.h"
 
-#include "stm32updater/stm32otaHandler.h"
-
 #include "ArduinoJsonJWT.h"
 #include "AuthenticationService.h"
 #include "SecurityService.h"
@@ -64,9 +62,6 @@ namespace esphome
               server->on(uri.c_str(), HTTP_GET, ArRequestHandlerFunction(requestHandler));
           }
           });
-
-      // STM32OTA
-      this->base_->add_handler(new stm32::STM32OTARequestHandler(this->base_));
 
       // rest info — must be heap-allocated; handlers bind `this` and would dangle
       // if these were stack locals destroyed when setupServer() returns.
