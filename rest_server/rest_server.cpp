@@ -30,7 +30,8 @@ namespace esphome
       WWWData::registerRoutes(
           [server, this](const String &uri, const String &contentType, const uint8_t *content, size_t len)
           {
-            ArRequestHandlerFunction requestHandler = [contentType, content, len](AsyncWebServerRequest *request)
+            std::function<void(AsyncWebServerRequest *)> requestHandler =
+                [contentType, content, len](AsyncWebServerRequest *request)
             {
               AsyncWebServerResponse *response = request->beginResponse(200, contentType.c_str(), content, len);
               response->addHeader("Content-Encoding", "gzip");
@@ -41,8 +42,6 @@ namespace esphome
             // OPTIONS get a straight up 200 response
             if (uri.equals("/index.html"))
             {
-              server->on(uri.c_str(), HTTP_GET, ArRequestHandlerFunction(requestHandler));
-
               server->onNotFound([requestHandler](AsyncWebServerRequest *request)
                                  {
                 if (request->method() == HTTP_GET) {
@@ -52,10 +51,11 @@ namespace esphome
                 } else {
                   request->send(404);
                 } });
+              server->on(uri.c_str(), HTTP_GET, std::move(requestHandler));
             }
             else
             {
-              server->on(uri.c_str(), HTTP_GET, ArRequestHandlerFunction(requestHandler));
+              server->on(uri.c_str(), HTTP_GET, std::move(requestHandler));
           }
           });
 
