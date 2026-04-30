@@ -1,19 +1,18 @@
-import esphome.config_validation as cv
 import esphome.codegen as cg
-from esphome.const import CONF_ID
-from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
+import esphome.config_validation as cv
 from esphome.components import web_server_base
-from esphome.core import CORE
+from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
+from esphome.const import CONF_ID
 from pathlib import Path
 
-AUTO_LOAD = ["web_server_base", "gsmart_server"]
+AUTO_LOAD = ["json", "web_server_base"]
 
-rest_server_ns = cg.esphome_ns.namespace("rest_server")
-RestServer = rest_server_ns.class_("RestServer", cg.Component)
+gsmart_server_ns = cg.esphome_ns.namespace("gsmart_server")
+GsmartServer = gsmart_server_ns.class_("GsmartServer", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(RestServer),
+        cv.GenerateID(): cv.declare_id(GsmartServer),
         cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
             web_server_base.WebServerBase
         ),
@@ -25,13 +24,9 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
 
-    cg.add_define("USE_RESTSERVER")
+    cg.add_define("USE_GSMART_SERVER")
     component_dir = Path(__file__).parent.resolve().as_posix()
     cg.add_build_flag(f"-I{component_dir}")
 
     var = cg.new_Pvariable(config[CONF_ID], paren)
     await cg.register_component(var, config)
-
-    if CORE.using_arduino:
-        pass
-        

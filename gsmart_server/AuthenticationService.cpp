@@ -1,9 +1,12 @@
 #include "AuthenticationService.h"
 
-// Simple AsyncWebHandler for /sec/signin POST with JSON body
+// AsyncWebHandler for /sec/signin POST with JSON body.
+// Body is consumed via handleBody (same pattern as Config* handlers) so we
+// don't depend on framework-internal storage of the POST body.
 class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
  private:
   AuthenticationService *auth_service_;
+  std::string body_;
 
  public:
   SignInHandler(AuthenticationService *auth) : auth_service_(auth) {}
@@ -16,25 +19,25 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
   }
 
   void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
-    // Framework already consumed the POST body into request->post_query_
-    // (see web_server_idf.cpp request_post_handler). Don't re-read with
-    // httpd_req_recv — the socket has no more data and casting the request
-    // pointer to httpd_req_t* is undefined behavior (vptr is at offset 0).
-    const std::string &body = request->post_query_;
+    // Body handled by handleBody.
+  }
 
-    if (body.empty()) {
+  void handleBody(esphome::web_server_idf::AsyncWebServerRequest *request, uint8_t *data, size_t len,
+                  size_t index, size_t total) override {
+    if (index == 0) body_.clear();
+    body_.append((char *) data, len);
+    if (index + len != total) return;
+
+    if (body_.empty()) {
       request->send(400);
       return;
     }
-
-    bool ok = esphome::json::parse_json(body, [this, request](JsonObject root) {
+    bool ok = esphome::json::parse_json(body_, [this, request](JsonObject root) {
       JsonVariant json = root;
       auth_service_->signIn(request, json);
       return true;
     });
-    if (!ok) {
-      request->send(400);
-    }
+    if (!ok) request->send(400);
   }
 };
 

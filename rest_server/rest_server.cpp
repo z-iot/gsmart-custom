@@ -4,10 +4,6 @@
 // #include "esphome/core/application.h"
 #include "WWWData.h"
 
-#include "ArduinoJsonJWT.h"
-#include "AuthenticationService.h"
-#include "SecurityService.h"
-
 #include "InfoFeature.h"
 #include "InfoSystem.h"
 #include "InfoNeighborhood.h"
@@ -80,11 +76,8 @@ namespace esphome
       new ConfigDef(server);
       new ConfigData(server);
 
-
-      SecurityService *securityService = new SecurityService(server);
-      securityService->begin();
-      new AuthenticationService(server, securityService);
-
+      // Auth/security services are now owned by gsmart_server (which is
+      // AUTO_LOADed). No need to instantiate them here.
 
 #if defined(ENABLE_CORS)
       DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
