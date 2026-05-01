@@ -26,7 +26,7 @@ class MobileApi : public Component {
 
   void setup() override;
 
-  // After gsmart_server (WIFI - 0.5f) so auth/security services already exist.
+  // After deck_server (WIFI - 0.5f) so auth/security services already exist.
   float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
 
   void add_on_identify_callback(std::function<void(IdentifyRequest)> &&callback) {

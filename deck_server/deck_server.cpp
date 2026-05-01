@@ -1,11 +1,11 @@
-#include "gsmart_server.h"
+#include "deck_server.h"
 
 namespace esphome {
-namespace gsmart_server {
+namespace deck_server {
 
-GsmartServer *gsmartServer = nullptr;
+DeckServer *deckServer = nullptr;
 
-void GsmartServer::setup() {
+void DeckServer::setup() {
   this->base_->init();
 
   auto server = this->server();
@@ -13,8 +13,8 @@ void GsmartServer::setup() {
   this->security_->begin();
   this->auth_ = new AuthenticationService(server, this->security_);
 
-  gsmartServer = this;
+  deckServer = this;
 }
 
-}  // namespace gsmart_server
+}  // namespace deck_server
 }  // namespace esphome

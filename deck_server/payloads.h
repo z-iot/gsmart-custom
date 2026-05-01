@@ -8,7 +8,7 @@
 #include "esphome/components/json/json_util.h"
 
 namespace esphome {
-namespace gsmart_server {
+namespace deck_server {
 namespace payloads {
 
 // --- Read helpers (build JSON from storage / runtime). ---
@@ -36,5 +36,5 @@ void scheduller_apply(JsonObject root);
 void neighbor_apply(JsonObject root);
 
 }  // namespace payloads
-}  // namespace gsmart_server
+}  // namespace deck_server
 }  // namespace esphome

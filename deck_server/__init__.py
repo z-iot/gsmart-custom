@@ -7,12 +7,12 @@ from pathlib import Path
 
 AUTO_LOAD = ["json", "web_server_base"]
 
-gsmart_server_ns = cg.esphome_ns.namespace("gsmart_server")
-GsmartServer = gsmart_server_ns.class_("GsmartServer", cg.Component)
+deck_server_ns = cg.esphome_ns.namespace("deck_server")
+DeckServer = deck_server_ns.class_("DeckServer", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(GsmartServer),
+        cv.GenerateID(): cv.declare_id(DeckServer),
         cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
             web_server_base.WebServerBase
         ),
@@ -24,7 +24,7 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
 
-    cg.add_define("USE_GSMART_SERVER")
+    cg.add_define("USE_DECK_SERVER")
     component_dir = Path(__file__).parent.resolve().as_posix()
     cg.add_build_flag(f"-I{component_dir}")
 

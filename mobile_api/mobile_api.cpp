@@ -1,7 +1,7 @@
 #include "mobile_api.h"
 
-#include "esphome/components/gsmart_server/payloads.h"
-#include "esphome/components/gsmart_server/web_helpers.h"
+#include "esphome/components/deck_server/payloads.h"
+#include "esphome/components/deck_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/util.h"
@@ -24,7 +24,7 @@
 namespace esphome {
 namespace mobile_api {
 
-namespace gs = esphome::gsmart_server;
+namespace gs = esphome::deck_server;
 
 namespace {
 

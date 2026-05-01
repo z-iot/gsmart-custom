@@ -7,14 +7,14 @@
 #include "SecurityService.h"
 
 namespace esphome {
-namespace gsmart_server {
+namespace deck_server {
 
 // Shared HTTP base for control_server and mobile_api: owns the AsyncWebServer
 // (via web_server_base) and the singleton auth/security services so both
 // upstream-facing components share the same JWT secret and session state.
-class GsmartServer : public Component {
+class DeckServer : public Component {
  public:
-  GsmartServer(web_server_base::WebServerBase *base) : base_(base) {}
+  DeckServer(web_server_base::WebServerBase *base) : base_(base) {}
 
   void setup() override;
 
@@ -34,7 +34,7 @@ class GsmartServer : public Component {
   ::AuthenticationService *auth_{nullptr};
 };
 
-extern GsmartServer *gsmartServer;
+extern DeckServer *deckServer;
 
-}  // namespace gsmart_server
+}  // namespace deck_server
 }  // namespace esphome

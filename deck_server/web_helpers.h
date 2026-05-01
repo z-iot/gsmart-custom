@@ -12,7 +12,7 @@
 #include <utility>
 
 namespace esphome {
-namespace gsmart_server {
+namespace deck_server {
 
 class AsyncCallbackWebHandler : public esphome::web_server_idf::AsyncWebHandler {
  public:
@@ -82,5 +82,5 @@ inline void on_post_json(const std::shared_ptr<esphome::web_server_idf::AsyncWeb
   server->addHandler(new AsyncJsonPostHandler(uri, std::move(fn)));
 }
 
-}  // namespace gsmart_server
+}  // namespace deck_server
 }  // namespace esphome

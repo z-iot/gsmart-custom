@@ -5,7 +5,7 @@
 #include "esphome/core/helpers.h"
 
 namespace esphome {
-namespace gsmart_server {
+namespace deck_server {
 namespace payloads {
 
 void system_info_json(JsonObject root) {
@@ -254,5 +254,5 @@ const char *config_def_string() {
 }
 
 }  // namespace payloads
-}  // namespace gsmart_server
+}  // namespace deck_server
 }  // namespace esphome

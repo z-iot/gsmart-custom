@@ -7,14 +7,14 @@ namespace esphome {
 namespace control_server {
 
 // Serves the device-local web UI (statika z WWWData) on the root path.
-// Pairs with gsmart_server (auth) and optionally with mobile_api (REST).
+// Pairs with deck_server (auth) and optionally with mobile_api (REST).
 class ControlServer : public Component {
  public:
   ControlServer(web_server_base::WebServerBase *base) : base_(base) {}
 
   void setup() override;
 
-  // After gsmart_server (WIFI - 0.5f) so auth services already exist.
+  // After deck_server (WIFI - 0.5f) so auth services already exist.
   float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
 
  protected:

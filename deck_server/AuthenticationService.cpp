@@ -44,9 +44,9 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
 
 AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> server, SecurityManager *securityManager) : _securityManager(securityManager)
 {
-  esphome::gsmart_server::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+  esphome::deck_server::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
                              std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
-  esphome::gsmart_server::on(server, LEGACY_VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+  esphome::deck_server::on(server, LEGACY_VERIFY_AUTHORIZATION_PATH, HTTP_GET,
                              std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
   // Register sign-in handler

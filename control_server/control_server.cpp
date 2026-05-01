@@ -1,18 +1,18 @@
 #include "control_server.h"
 
 #include "WWWData.h"
-#include "esphome/components/gsmart_server/payloads.h"
-#include "esphome/components/gsmart_server/web_helpers.h"
+#include "esphome/components/deck_server/payloads.h"
+#include "esphome/components/deck_server/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 namespace esphome {
 namespace control_server {
 
-namespace gs = esphome::gsmart_server;
+namespace gs = esphome::deck_server;
 
 namespace {
 
-// GET handler that builds a JSON response via the gsmart_server payload helper.
+// GET handler that builds a JSON response via the deck_server payload helper.
 void register_json_get(const std::shared_ptr<AsyncWebServer> &server, const char *uri,
                        std::function<void(JsonObject)> builder) {
   gs::on(server, uri, HTTP_GET, [builder](AsyncWebServerRequest *request) {
@@ -76,7 +76,7 @@ void ControlServer::setup() {
       });
 
   // Legacy gsmart-deck REST endpoints. The actual JSON building / storage
-  // wiring lives in gsmart_server::payloads so a future mobile_api can reuse
+  // wiring lives in deck_server::payloads so a future mobile_api can reuse
   // the same helpers under a clean /api/mobile/v1/* contract.
   register_json_get(server, "/inf/system", &gs::payloads::system_info_json);
   register_json_get(server, "/inf/neighborhood", &gs::payloads::neighborhood_json);
