@@ -9,6 +9,8 @@
 
 #ifdef USE_ESP32
 #include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "sdkconfig.h"
 #endif
 
@@ -47,10 +49,15 @@ namespace esphome
     {
       return static_cast<uint32_t>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
     }
+    static uint32_t diag_stack_hwm()
+    {
+      return static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+    }
 #else
     static uint32_t diag_heap_free() { return 0; }
     static uint32_t diag_heap_largest() { return 0; }
     static uint32_t diag_heap_min_free() { return 0; }
+    static uint32_t diag_stack_hwm() { return 0; }
 #endif
 
     void EspServer::setup()
@@ -101,13 +108,22 @@ namespace esphome
 #ifdef USE_ESP32
       char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
       auto url = request->url_to(url_buf);
+      const size_t url_len = url.size();
       auto starts_with = [&](const char *prefix, size_t plen) {
         return url.size() >= plen && std::memcmp(url.c_str(), prefix, plen) == 0;
       };
 #else
       const auto &url = request->url();
+      const size_t url_len = url.length();
       auto starts_with = [&](const char *prefix, size_t plen) { return url.startsWith(prefix); };
 #endif
+      if ((url == "/esp" || starts_with("/esp/", 5)) && url != "/esp/events")
+      {
+        ESP_LOGI(TAG,
+                 "canHandle method=%u url=%.*s heap=%" PRIu32 " largest=%" PRIu32 " stack_hwm=%" PRIu32,
+                 request->method(), (int) url_len, url.c_str(), diag_heap_free(), diag_heap_largest(),
+                 diag_stack_hwm());
+      }
       if (url == "/esp")
         return true;
       if (url == "/esp/diag")
@@ -126,12 +142,22 @@ namespace esphome
 #ifdef USE_ESP32
       char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
       auto url = request->url_to(url_buf);
+      const size_t url_len = url.size();
 #else
       const auto &url = request->url();
+      const size_t url_len = url.length();
 #endif
+      if ((url == "/esp" || (url_len >= 5 && std::memcmp(url.c_str(), "/esp/", 5) == 0)) && url != "/esp/events")
+      {
+        ESP_LOGI(TAG,
+                 "handle begin method=%u url=%.*s heap=%" PRIu32 " largest=%" PRIu32 " stack_hwm=%" PRIu32,
+                 request->method(), (int) url_len, url.c_str(), diag_heap_free(), diag_heap_largest(),
+                 diag_stack_hwm());
+      }
       if (url == "/esp")
       {
         this->handle_index_request(request);
+        ESP_LOGI(TAG, "handle /esp index sent stack_hwm=%" PRIu32, diag_stack_hwm());
         return;
       }
       if (url == "/esp/diag")
@@ -150,12 +176,14 @@ namespace esphome
 #endif
                                             });
         request->send(200, "application/json", data.c_str());
+        ESP_LOGI(TAG, "handle /esp/diag sent bytes=%zu stack_hwm=%" PRIu32, data.size(), diag_stack_hwm());
         return;
       }
       if (url == "/esp/close-events")
       {
         this->close_event_sources("manual /esp/close-events");
         request->send(200, "application/json", "{\"ok\":true}");
+        ESP_LOGI(TAG, "handle /esp/close-events sent stack_hwm=%" PRIu32, diag_stack_hwm());
         return;
       }
       if (url == "/")
@@ -164,6 +192,11 @@ namespace esphome
         return;
       }
       WebServer::handleRequest(request);
+      if ((url == "/esp" || (url_len >= 5 && std::memcmp(url.c_str(), "/esp/", 5) == 0)) && url != "/esp/events")
+      {
+        ESP_LOGI(TAG, "handle delegated done url=%.*s stack_hwm=%" PRIu32, (int) url_len, url.c_str(),
+                 diag_stack_hwm());
+      }
     }
 
   } // namespace web_server

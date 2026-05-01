@@ -15,6 +15,7 @@
 #include "StreamString.h"
 #endif
 
+#include <cinttypes>
 #include <cstdlib>
 
 #ifdef USE_LIGHT
@@ -23,6 +24,11 @@
 
 #ifdef USE_LOGGER
 #include "esphome/components/logger/logger.h"
+#endif
+#ifdef USE_ESP32
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
 
 #ifdef USE_CLIMATE
@@ -52,6 +58,38 @@
 namespace esphome::web_server {
 
 static const char *const TAG = "web_server";
+
+static uint32_t trace_heap_free() {
+#ifdef USE_ESP32
+  return static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_8BIT));
+#else
+  return 0;
+#endif
+}
+
+static uint32_t trace_heap_largest() {
+#ifdef USE_ESP32
+  return static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#else
+  return 0;
+#endif
+}
+
+static uint32_t trace_stack_hwm() {
+#ifdef USE_ESP32
+  return static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+#else
+  return 0;
+#endif
+}
+
+#ifdef USE_ESP32
+static bool trace_esp_url(StringRef url) {
+  return url == "/esp" || (url.size() > 5 && memcmp(url.c_str(), "/esp/", 5) == 0);
+}
+#elif defined(USE_ARDUINO)
+static bool trace_esp_url(const String &url) { return url == "/esp" || url.startsWith("/esp/"); }
+#endif
 
 // Longest: UPDATE AVAILABLE (16 chars + null terminator, rounded up)
 static constexpr size_t PSTR_LOCAL_SIZE = 18;
@@ -705,18 +743,33 @@ void WebServer::on_text_sensor_update(text_sensor::TextSensor *obj) {
   this->events_.deferrable_send_state(obj, "state", text_sensor_state_json_generator);
 }
 void WebServer::handle_text_sensor_request(AsyncWebServerRequest *request, const UrlMatch &match) {
+  ESP_LOGI(TAG, "text_sensor lookup id=%.*s action=%.*s heap=%" PRIu32 " largest=%" PRIu32 " stack_hwm=%" PRIu32,
+           (int) match.id.size(), match.id.c_str(), (int) match.method.size(), match.method.c_str(),
+           trace_heap_free(), trace_heap_largest(), trace_stack_hwm());
   for (text_sensor::TextSensor *obj : App.get_text_sensors()) {
     auto entity_match = match.match_entity(obj);
     if (!entity_match.matched)
       continue;
     // Note: request->method() is always HTTP_GET here (canHandle ensures this)
     if (entity_match.action_is_empty) {
+      const StringRef &name = obj->get_name();
+      char object_id_buf[OBJECT_ID_MAX_LEN];
+      StringRef object_id = obj->get_object_id_to(object_id_buf);
       auto detail = get_request_detail(request);
+      ESP_LOGI(TAG,
+               "text_sensor matched name=%.*s object_id=%.*s state_len=%zu detail=%s stack_hwm=%" PRIu32,
+               (int) name.size(), name.c_str(), (int) object_id.size(), object_id.c_str(), obj->state.size(),
+               detail == DETAIL_ALL ? "all" : "state", trace_stack_hwm());
       auto data = this->text_sensor_json_(obj, obj->state, detail);
+      ESP_LOGI(TAG, "text_sensor json built bytes=%zu stack_hwm=%" PRIu32, data.size(), trace_stack_hwm());
       request->send(200, "application/json", data.c_str());
+      ESP_LOGI(TAG, "text_sensor response sent name=%.*s bytes=%zu stack_hwm=%" PRIu32, (int) name.size(),
+               name.c_str(), data.size(), trace_stack_hwm());
       return;
     }
   }
+  ESP_LOGI(TAG, "text_sensor not found id=%.*s stack_hwm=%" PRIu32, (int) match.id.size(), match.id.c_str(),
+           trace_stack_hwm());
   request->send(404);
 }
 json::SerializationBuffer<> WebServer::text_sensor_state_json_generator(WebServer *web_server, void *source) {
@@ -766,15 +819,29 @@ void WebServer::on_switch_update(switch_::Switch *obj) {
   this->events_.deferrable_send_state(obj, "state", switch_state_json_generator);
 }
 void WebServer::handle_switch_request(AsyncWebServerRequest *request, const UrlMatch &match) {
+  ESP_LOGI(TAG, "switch lookup id=%.*s action=%.*s method=%u heap=%" PRIu32 " largest=%" PRIu32
+                " stack_hwm=%" PRIu32,
+           (int) match.id.size(), match.id.c_str(), (int) match.method.size(), match.method.c_str(),
+           request->method(), trace_heap_free(), trace_heap_largest(), trace_stack_hwm());
   for (switch_::Switch *obj : App.get_switches()) {
     auto entity_match = match.match_entity(obj);
     if (!entity_match.matched)
       continue;
+    const StringRef &name = obj->get_name();
+    char object_id_buf[OBJECT_ID_MAX_LEN];
+    StringRef object_id = obj->get_object_id_to(object_id_buf);
+    ESP_LOGI(TAG, "switch matched name=%.*s object_id=%.*s state=%s action_empty=%s stack_hwm=%" PRIu32,
+             (int) name.size(), name.c_str(), (int) object_id.size(), object_id.c_str(), ONOFF(obj->state),
+             YESNO(entity_match.action_is_empty), trace_stack_hwm());
 
     if (request->method() == HTTP_GET && entity_match.action_is_empty) {
       auto detail = get_request_detail(request);
       auto data = this->switch_json_(obj, obj->state, detail);
+      ESP_LOGI(TAG, "switch json built name=%.*s bytes=%zu detail=%s stack_hwm=%" PRIu32, (int) name.size(),
+               name.c_str(), data.size(), detail == DETAIL_ALL ? "all" : "state", trace_stack_hwm());
       request->send(200, "application/json", data.c_str());
+      ESP_LOGI(TAG, "switch response sent name=%.*s bytes=%zu stack_hwm=%" PRIu32, (int) name.size(), name.c_str(),
+               data.size(), trace_stack_hwm());
       return;
     }
 
@@ -789,13 +856,28 @@ void WebServer::handle_switch_request(AsyncWebServerRequest *request, const UrlM
     }
 
     if (action != SWITCH_ACTION_NONE) {
-      this->defer([obj, action]() { execute_switch_action(obj, action); });
+      ESP_LOGI(TAG, "switch deferring action=%u name=%.*s stack_hwm=%" PRIu32, action, (int) name.size(),
+               name.c_str(), trace_stack_hwm());
+      this->defer([obj, action]() {
+        const StringRef &deferred_name = obj->get_name();
+        ESP_LOGI(TAG, "switch action begin action=%u name=%.*s", action, (int) deferred_name.size(),
+                 deferred_name.c_str());
+        execute_switch_action(obj, action);
+        ESP_LOGI(TAG, "switch action done action=%u name=%.*s state=%s", action, (int) deferred_name.size(),
+                 deferred_name.c_str(), ONOFF(obj->state));
+      });
       request->send(200);
+      ESP_LOGI(TAG, "switch 200 sent name=%.*s action=%u stack_hwm=%" PRIu32, (int) name.size(), name.c_str(),
+               action, trace_stack_hwm());
     } else {
+      ESP_LOGI(TAG, "switch unknown action=%.*s name=%.*s stack_hwm=%" PRIu32, (int) match.method.size(),
+               match.method.c_str(), (int) name.size(), name.c_str(), trace_stack_hwm());
       request->send(404);
     }
     return;
   }
+  ESP_LOGI(TAG, "switch not found id=%.*s action=%.*s stack_hwm=%" PRIu32, (int) match.id.size(), match.id.c_str(),
+           (int) match.method.size(), match.method.c_str(), trace_stack_hwm());
   request->send(404);
 }
 json::SerializationBuffer<> WebServer::switch_state_json_generator(WebServer *web_server, void *source) {
@@ -2405,9 +2487,18 @@ void WebServer::handleRequest(AsyncWebServerRequest *request) {
 #ifdef USE_ESP32
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   StringRef url = request->url_to(url_buf);
+  const size_t url_len = url.size();
 #else
   const auto &url = request->url();
+  const size_t url_len = url.length();
 #endif
+  const bool trace_request = trace_esp_url(url) && url != ESPHOME_F("/esp/events");
+  if (trace_request) {
+    ESP_LOGI(TAG,
+             "REST begin method=%u url=%.*s heap=%" PRIu32 " largest=%" PRIu32 " stack_hwm=%" PRIu32,
+             request->method(), (int) url_len, url.c_str(), trace_heap_free(), trace_heap_largest(),
+             trace_stack_hwm());
+  }
 
   // Handle static routes first
   if (url == ESPHOME_F("/")) {
@@ -2446,6 +2537,11 @@ void WebServer::handleRequest(AsyncWebServerRequest *request) {
   // Parse URL for component routing
   // Pass HTTP method to disambiguate 3-segment URLs (GET=sub-device state, POST=main device action)
   UrlMatch match = match_url(url.c_str(), url.length(), false, request->method() == HTTP_POST);
+  if (trace_request) {
+    ESP_LOGI(TAG, "REST match valid=%s domain=%.*s id=%.*s action=%.*s stack_hwm=%" PRIu32, YESNO(match.valid),
+             (int) match.domain.size(), match.domain.c_str(), (int) match.id.size(), match.id.c_str(),
+             (int) match.method.size(), match.method.c_str(), trace_stack_hwm());
+  }
 
   // Route to appropriate handler based on domain
   // NOLINTNEXTLINE(readability-simplify-boolean-expr)
