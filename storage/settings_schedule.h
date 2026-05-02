@@ -49,8 +49,7 @@ namespace esphome
 
       void toJson(JsonObject &root) override
       {
-        if (!this->enabled)
-          root["enabled"] = this->enabled;
+        root["enabled"] = this->enabled;
 
         JsonArray arr = root["frames"].to<JsonArray>();
         for (auto &item : this->schedule)
