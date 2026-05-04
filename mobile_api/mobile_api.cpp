@@ -743,6 +743,57 @@ void handle_identify(MobileApi *api, AsyncWebServerRequest *request, JsonObject 
   });
 }
 
+void handle_api_config(AsyncWebServerRequest *request, JsonObject root) {
+  bool changed = false;
+  if (!root["wifi_ssid"].isNull()) {
+    std::string ssid = root["wifi_ssid"].as<std::string>();
+    std::string password = json_string(root["wifi_password"]);
+    wifi::global_wifi_component->save_wifi_sta(ssid, password);
+    changed = true;
+  }
+  if (!root["region"].isNull()) {
+    int region_serial = root["region"].as<int>();
+    #ifdef GSMART_FEATURE_REGION
+    storage::store->region->layout.serial = region_serial;
+    storage::store->region->save();
+    #endif
+    changed = true;
+  }
+  if (!root["mode"].isNull()) {
+    std::string mode = root["mode"].as<std::string>();
+    #ifdef GSMART_FEATURE_REGION
+    if (mode == "master") {
+      storage::store->region->layout.masterIndex = storage::store->region->selfIndex;
+      storage::store->region->save();
+    }
+    #endif
+    changed = true;
+  }
+  if (!root["device_name"].isNull()) {
+    // In ESPHome device name is usually fixed in YAML, but we can store a friendly name in storage if available.
+    // For now, we'll just log it or handle if there's a global for it.
+    ESP_LOGI("config", "New device name received: %s", root["device_name"].as<const char *>());
+  }
+
+  send_ok(request, [changed](JsonObject response) {
+    response["applied"] = changed;
+  });
+}
+
+void handle_api_manual_control(AsyncWebServerRequest *request, JsonObject root) {
+  if (root["command"].isNull()) {
+    send_error(request, 400, "missing_command", "Missing field: command");
+    return;
+  }
+  std::string cmd = normalize_token(root["command"].as<std::string>());
+  storage::RadiationMode mode = (cmd == "on") ? storage::RadiationMode::STD : storage::RadiationMode::NONE;
+  storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
+  
+  send_ok(request, [mode](JsonObject response) {
+    response["mode"] = radiation_mode_to_api(mode);
+  });
+}
+
 }  // namespace
 
 void MobileApi::setup() {
@@ -798,6 +849,19 @@ void MobileApi::setup() {
     ping_region(root);
     send_ok(request, [](JsonObject response) { response["sent"] = true; });
   });
+
+  // Compatibility aliases for the new mobile app provisioning
+  register_json_get(server, "/api/status", build_status);
+  register_json_post(server, "/api/config", handle_api_config);
+  register_json_post(server, "/api/scheduler", [](AsyncWebServerRequest *request, JsonObject root) {
+    gs::payloads::scheduller_apply(root);
+    send_ok(request, [](JsonObject response) { response["saved"] = true; });
+  });
+  register_json_post(server, "/api/region", [](AsyncWebServerRequest *request, JsonObject root) {
+    apply_region(root);
+    send_ok(request, [](JsonObject response) { response["saved"] = true; });
+  });
+  register_json_post(server, "/api/manual-control", handle_api_manual_control);
 }
 
 }  // namespace mobile_api
