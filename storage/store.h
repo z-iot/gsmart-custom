@@ -118,7 +118,7 @@ namespace esphome
         return convertSituationSecToDurationStr(sec);
       }
 
-      std::string getSituationStatus(int egmode, int setup_mode)
+      std::string getSituationStatus(int egmode, int setup_mode, bool is_service_hotspot = false)
       {
         std::string res = "";
         if (!this->global->isWorking)
@@ -133,8 +133,13 @@ namespace esphome
           // mqtt server
           res += "Q";
         else if (wifi::global_wifi_component->is_connected())
+        {
           // wifi
-          res += "W";
+          if (is_service_hotspot)
+            res += "H"; // Hotspot service icon/mode
+          else
+            res += "W";
+        }
 
         if (wifi::global_wifi_component->isApActive())
           // AP
