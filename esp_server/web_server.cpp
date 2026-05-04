@@ -476,10 +476,21 @@ void WebServer::loop() {
 
 #ifdef USE_LOGGER
 void WebServer::on_log(uint8_t level, const char *tag, const char *message, size_t message_len) {
+#if USE_WEBSERVER_VERSION >= 2
+  if (this->get_event_source_count() == 0)
+    return;
+  std::string data = json::build_json([&](JsonObject root) {
+    root["level"] = level;
+    root["tag"] = tag;
+    root["message"] = message;
+  });
+  this->events_.try_send_nodefer(data.c_str(), "log");
+#else
   (void) level;
   (void) tag;
   (void) message_len;
   this->events_.try_send_nodefer(message, "log", millis());
+#endif
 }
 #endif
 
