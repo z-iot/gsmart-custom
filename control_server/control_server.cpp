@@ -62,6 +62,12 @@ void ControlServer::setup() {
           // SPA fallback: any unmatched GET serves index.html. OPTIONS get a 200.
           server->onNotFound([requestHandler](AsyncWebServerRequest *request) {
             if (request->method() == HTTP_GET) {
+              char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+              request->url_to(url_buf);
+              String url = url_buf;
+              if (url.startsWith("/esp/") || url.equals("/events") || url.equals("/entities") || url.equals("/states")) {
+                return;
+              }
               requestHandler(request);
             } else if (request->method() == HTTP_OPTIONS) {
               request->send(200);
@@ -69,6 +75,7 @@ void ControlServer::setup() {
               request->send(404);
             }
           });
+          gs::on(server, "/", HTTP_GET, requestHandler);
           gs::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));
         } else {
           gs::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));

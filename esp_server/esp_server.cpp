@@ -203,15 +203,13 @@ void EspServer::on_lock_update(lock::Lock *obj) {
 bool EspServer::canHandle(WebServerRequest *request) const {
 #ifdef USE_ESP32
   char url_buf[WebServerRequest::URL_BUF_SIZE];
-  auto url = request->url_to(url_buf);
+  String url = request->url_to(url_buf).c_str();
 #else
   auto url = request->url();
 #endif
   
   if (url == "/esp") return true;
-  if (url == "/esp/events") return true;
-  if (url == "/esp/diag") return true;
-  if (url == "/esp/close-events") return true;
+  if (url.startsWith("/esp/")) return true;
   if (url == "/0.css" || url == "/0.js") return true;
 
   return false;
@@ -220,19 +218,83 @@ bool EspServer::canHandle(WebServerRequest *request) const {
 void EspServer::handleRequest(WebServerRequest *request) {
 #ifdef USE_ESP32
   char url_buf[WebServerRequest::URL_BUF_SIZE];
-  auto url = request->url_to(url_buf);
+  String url = request->url_to(url_buf).c_str();
 #else
   auto url = request->url();
 #endif
 
-  if (url == "/esp") {
+  if (url == "/esp" || url == "/esp/") {
     this->handle_index_request(request);
     return;
   }
 
-  if (url == "/esp/events") {
-    this->events_.handleRequest(request);
-    return;
+  if (url.startsWith("/esp/")) {
+    String sub_url = url.substring(4); // Keep the leading slash: "/switch/..."
+    
+    if (sub_url == "/events") {
+      this->events_.handleRequest(request);
+      return;
+    }
+    
+    // Simple segment parser for /domain/id[/method]
+    int first_slash = sub_url.indexOf('/', 1);
+    if (first_slash != -1) {
+      UrlMatch match{};
+      match.domain = StringRef(sub_url.c_str() + 1, first_slash - 1);
+      
+      int second_slash = sub_url.indexOf('/', first_slash + 1);
+      if (second_slash != -1) {
+        match.id = StringRef(sub_url.c_str() + first_slash + 1, second_slash - first_slash - 1);
+        match.method = StringRef(sub_url.c_str() + second_slash + 1, sub_url.length() - second_slash - 1);
+      } else {
+        match.id = StringRef(sub_url.c_str() + first_slash + 1, sub_url.length() - first_slash - 1);
+      }
+      match.valid = true;
+
+#define HANDLE_DOMAIN(domain_str, handle_method) \
+      if (match.domain == domain_str) { \
+        this->parent_->handle_method(request, match); \
+        return; \
+      }
+
+#ifdef USE_SENSOR
+      HANDLE_DOMAIN("sensor", handle_sensor_request)
+#endif
+#ifdef USE_SWITCH
+      HANDLE_DOMAIN("switch", handle_switch_request)
+#endif
+#ifdef USE_BUTTON
+      HANDLE_DOMAIN("button", handle_button_request)
+#endif
+#ifdef USE_BINARY_SENSOR
+      HANDLE_DOMAIN("binary_sensor", handle_binary_sensor_request)
+#endif
+#ifdef USE_FAN
+      HANDLE_DOMAIN("fan", handle_fan_request)
+#endif
+#ifdef USE_LIGHT
+      HANDLE_DOMAIN("light", handle_light_request)
+#endif
+#ifdef USE_TEXT_SENSOR
+      HANDLE_DOMAIN("text_sensor", handle_text_sensor_request)
+#endif
+#ifdef USE_COVER
+      HANDLE_DOMAIN("cover", handle_cover_request)
+#endif
+#ifdef USE_NUMBER
+      HANDLE_DOMAIN("number", handle_number_request)
+#endif
+#ifdef USE_SELECT
+      HANDLE_DOMAIN("select", handle_select_request)
+#endif
+#ifdef USE_LOCK
+      HANDLE_DOMAIN("lock", handle_lock_request)
+#endif
+#ifdef USE_CLIMATE
+      HANDLE_DOMAIN("climate", handle_climate_request)
+#endif
+#undef HANDLE_DOMAIN
+    }
   }
 
   if (url == "/esp/diag") {
