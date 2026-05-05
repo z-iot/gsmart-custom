@@ -21,6 +21,7 @@ from esphome.const import (
     CONF_LOCAL,
 )
 from esphome.core import CORE, coroutine_with_priority
+from esphome.components.esp32 import add_idf_sdkconfig_option
 
 AUTO_LOAD = ["json", "web_server_base"]
 DEPENDENCIES = ["web_server"]
@@ -107,6 +108,9 @@ def add_resource_as_progmem(
 
 @coroutine_with_priority(40.0)
 async def to_code(config):
+    # Increase the maximum supported size of headers section in HTTP request packet to be processed by the server
+    add_idf_sdkconfig_option("CONFIG_HTTPD_MAX_REQ_HDR_LEN", 1024)
+
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
     ws = await cg.get_variable(config[CONF_WEB_SERVER_ID])
     var = cg.new_Pvariable(config[CONF_ID], paren, ws)

@@ -81,7 +81,7 @@ void EspServer::loop() {
 void EspServer::setup_interval() {
   this->set_interval(30000, [this]() {
 #ifdef USE_ESP32
-    const auto clients = this->events_.active_count();
+    const auto clients = this->events_.count();
 #else
     const auto clients = 0;
 #endif
@@ -239,7 +239,7 @@ void EspServer::handleRequest(WebServerRequest *request) {
     std::string data = json::build_json([this](JsonObject root) {
       root["uptime_ms"] = millis();
 #ifdef USE_ESP32
-      root["sse_clients"] = this->events_.active_count();
+      root["sse_clients"] = this->events_.count();
 #endif
       root["heap_free"] = diag_heap_free();
       root["heap_largest"] = diag_heap_largest();
@@ -291,15 +291,14 @@ void EspServer::handle_index_request(WebServerRequest *request) {
 }
 
 void EspServer::close_event_sources(const char *reason) {
-#ifdef USE_ESP32
-  this->events_.close_all(reason ? reason : "manual close_event_sources");
-#endif
+  // Official ESPHome AsyncEventSource does not support close_all().
+  // Connections will be naturally closed when ESP restarts.
 }
 
 #ifdef USE_LOGGER
 void EspServer::on_log(uint8_t level, const char *tag, const char *message, size_t message_len) {
 #ifdef USE_ESP32
-  if (this->events_.active_count() == 0)
+  if (this->events_.count() == 0)
     return;
   std::string data = json::build_json([&](JsonObject root) {
     root["level"] = level;
