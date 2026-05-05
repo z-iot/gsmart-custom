@@ -74,32 +74,32 @@ void EspServer::setup() {
              uptime);
     client->try_send_nodefer(buf, "ping", millis(), 30000);
 
-    // Send initial states for all entities
+    // Send initial states for all entities with full metadata
 #ifdef USE_SENSOR
     for (auto *obj : App.get_sensors()) {
       if (!this->include_internal_ && obj->is_internal()) continue;
-      auto json = this->sensor_json_(obj, obj->state);
+      auto json = this->sensor_json_(obj, obj->state, true);
       client->try_send_nodefer(json.c_str(), "state");
     }
 #endif
 #ifdef USE_BINARY_SENSOR
     for (auto *obj : App.get_binary_sensors()) {
       if (!this->include_internal_ && obj->is_internal()) continue;
-      auto json = this->binary_sensor_json_(obj, obj->state);
+      auto json = this->binary_sensor_json_(obj, obj->state, true);
       client->try_send_nodefer(json.c_str(), "state");
     }
 #endif
 #ifdef USE_SWITCH
     for (auto *obj : App.get_switches()) {
       if (!this->include_internal_ && obj->is_internal()) continue;
-      auto json = this->switch_json_(obj, obj->state);
+      auto json = this->switch_json_(obj, obj->state, true);
       client->try_send_nodefer(json.c_str(), "state");
     }
 #endif
 #ifdef USE_TEXT_SENSOR
     for (auto *obj : App.get_text_sensors()) {
       if (!this->include_internal_ && obj->is_internal()) continue;
-      auto json = this->text_sensor_json_(obj, obj->state);
+      auto json = this->text_sensor_json_(obj, obj->state, true);
       client->try_send_nodefer(json.c_str(), "state");
     }
 #endif
@@ -406,12 +406,8 @@ void EspServer::on_log(uint8_t level, const char *tag, const char *message, size
 #ifdef USE_ESP32
   if (this->events_.count() == 0)
     return;
-  std::string data = json::build_json([&](JsonObject root) {
-    root["level"] = level;
-    root["tag"] = tag;
-    root["message"] = message;
-  });
-  this->events_.try_send_nodefer(data.c_str(), "log");
+  // Official ESPHome v3 dashboard expects raw message strings for logs
+  this->events_.try_send_nodefer(message, "log");
 #endif
 }
 #endif
@@ -458,12 +454,21 @@ void EspServer::handle_climate_request(WebServerRequest *request, const ::esphom
 #endif
 
 #ifdef USE_SENSOR
-std::string EspServer::sensor_json_(sensor::Sensor *obj, float value) {
-  return json::build_json([obj, value](JsonObject root) {
+std::string EspServer::sensor_json_(sensor::Sensor *obj, float value, bool include_metadata) {
+  return json::build_json([obj, value, include_metadata](JsonObject root) {
     char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    obj->get_object_id_to(id_buf);
     root["id"] = "sensor-" + std::string(id_buf);
     
+    if (include_metadata) {
+      root["name"] = obj->get_name();
+      char icon_buf[64];
+      root["icon"] = obj->get_icon_to(icon_buf);
+      root["entity_category"] = (int)obj->get_entity_category();
+      if (!obj->get_unit_of_measurement_ref().empty())
+        root["uom"] = obj->get_unit_of_measurement_ref();
+    }
+
     if (std::isnan(value)) {
       root["state"] = "NA";
     } else {
@@ -477,11 +482,19 @@ std::string EspServer::sensor_json_(sensor::Sensor *obj, float value) {
 #endif
 
 #ifdef USE_BINARY_SENSOR
-std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value) {
-  return json::build_json([obj, value](JsonObject root) {
+std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value, bool include_metadata) {
+  return json::build_json([obj, value, include_metadata](JsonObject root) {
     char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    obj->get_object_id_to(id_buf);
     root["id"] = "binary_sensor-" + std::string(id_buf);
+
+    if (include_metadata) {
+      root["name"] = obj->get_name();
+      char icon_buf[64];
+      root["icon"] = obj->get_icon_to(icon_buf);
+      root["entity_category"] = (int)obj->get_entity_category();
+    }
+
     root["state"] = value ? "ON" : "OFF";
     root["value"] = value;
   });
@@ -489,11 +502,19 @@ std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, boo
 #endif
 
 #ifdef USE_SWITCH
-std::string EspServer::switch_json_(switch_::Switch *obj, bool value) {
-  return json::build_json([obj, value](JsonObject root) {
+std::string EspServer::switch_json_(switch_::Switch *obj, bool value, bool include_metadata) {
+  return json::build_json([obj, value, include_metadata](JsonObject root) {
     char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    obj->get_object_id_to(id_buf);
     root["id"] = "switch-" + std::string(id_buf);
+
+    if (include_metadata) {
+      root["name"] = obj->get_name();
+      char icon_buf[64];
+      root["icon"] = obj->get_icon_to(icon_buf);
+      root["entity_category"] = (int)obj->get_entity_category();
+    }
+
     root["state"] = value ? "ON" : "OFF";
     root["value"] = value;
   });
@@ -501,11 +522,19 @@ std::string EspServer::switch_json_(switch_::Switch *obj, bool value) {
 #endif
 
 #ifdef USE_TEXT_SENSOR
-std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value) {
-  return json::build_json([obj, value](JsonObject root) {
+std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value, bool include_metadata) {
+  return json::build_json([obj, value, include_metadata](JsonObject root) {
     char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    obj->get_object_id_to(id_buf);
     root["id"] = "text_sensor-" + std::string(id_buf);
+
+    if (include_metadata) {
+      root["name"] = obj->get_name();
+      char icon_buf[64];
+      root["icon"] = obj->get_icon_to(icon_buf);
+      root["entity_category"] = (int)obj->get_entity_category();
+    }
+
     root["state"] = value;
     root["value"] = value;
   });

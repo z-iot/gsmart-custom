@@ -69,7 +69,7 @@ namespace esphome
 
       StateUpdateResult fromJson(JsonObject &root) override
       {
-        if (root.containsKey("enabled")) {
+        if (!root["enabled"].isNull()) {
           this->enabled = root["enabled"].as<bool>();
         } else if (root.isNull()) {
           // Keep default if root is null (e.g. file not found)

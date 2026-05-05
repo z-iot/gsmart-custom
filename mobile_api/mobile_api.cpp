@@ -439,8 +439,8 @@ void build_diagnostics(JsonObject root) {
   JsonObject filesystem = root["filesystem"].to<JsonObject>();
 #ifdef GSMART_FEATURE_FILESYSTEM
   filesystem["enabled"] = true;
-  filesystem["total"] = storage::store->fileSystem->GetTotalBytes();
-  filesystem["used"] = storage::store->fileSystem->GetUsedBytes();
+  filesystem["total"] = storage::store->file_system_->GetTotalBytes();
+  filesystem["used"] = storage::store->file_system_->GetUsedBytes();
 #else
   filesystem["enabled"] = false;
   filesystem["total"] = 0;

@@ -137,10 +137,10 @@ class EspServer : public Component, public WebHandler, public ::esphome::Control
   void handle_lock_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
   void handle_climate_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
 
-  std::string sensor_json_(sensor::Sensor *obj, float value);
-  std::string binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value);
-  std::string switch_json_(switch_::Switch *obj, bool value);
-  std::string text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value);
+  std::string sensor_json_(sensor::Sensor *obj, float value, bool include_metadata = false);
+  std::string binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value, bool include_metadata = false);
+  std::string switch_json_(switch_::Switch *obj, bool value, bool include_metadata = false);
+  std::string text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value, bool include_metadata = false);
 
   WebEventSource events_;
   bool include_internal_{false};

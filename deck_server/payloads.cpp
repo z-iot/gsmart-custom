@@ -29,12 +29,12 @@ void system_info_json(JsonObject root) {
   root["flash_chip_size"] = ESP.getFlashChipSize();
   root["flash_chip_speed"] = ESP.getFlashChipSpeed();
 
-  root["fs_total"] = esphome::storage::fileSystem->GetTotalBytes();
-  root["fs_used"] = esphome::storage::fileSystem->GetUsedBytes();
+  root["fs_total"] = esphome::storage::store->file_system_->GetTotalBytes();
+  root["fs_used"] = esphome::storage::store->file_system_->GetUsedBytes();
 
   // TODO vyhodit
   JsonObject dir = root["root_dir"].to<JsonObject>();
-  esphome::storage::fileSystem->listDir(dir);
+  esphome::storage::store->file_system_->listDir(dir);
 
   JsonObject schedule = root["schedule"].to<JsonObject>();
   esphome::storage::store->schedule->toJson(schedule);
@@ -78,12 +78,12 @@ void neighborhood_json(JsonObject root) {
   root["flash_chip_size"] = ESP.getFlashChipSize();
   root["flash_chip_speed"] = ESP.getFlashChipSpeed();
 
-  root["fs_total"] = esphome::storage::fileSystem->GetTotalBytes();
-  root["fs_used"] = esphome::storage::fileSystem->GetUsedBytes();
+  root["fs_total"] = esphome::storage::store->file_system_->GetTotalBytes();
+  root["fs_used"] = esphome::storage::store->file_system_->GetUsedBytes();
 
   // TODO vyhodit
   JsonObject dir = root["root_dir"].to<JsonObject>();
-  esphome::storage::fileSystem->listDir(dir);
+  esphome::storage::store->file_system_->listDir(dir);
 }
 
 void features_json(JsonObject root) {
