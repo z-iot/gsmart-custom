@@ -1,4 +1,6 @@
 #include "mobile_api.h"
+using namespace esphome::web_server_idf;
+#include "esphome/components/esp_server/esp_server.h"
 
 #include "esphome/components/deck_server/payloads.h"
 #include "esphome/components/deck_server/web_helpers.h"
@@ -29,6 +31,10 @@ namespace mobile_api {
 namespace gs = esphome::deck_server;
 
 namespace {
+
+using AsyncWebServerRequest = esphome::web_server_idf::AsyncWebServerRequest;
+using AsyncWebServer = esphome::web_server_idf::AsyncWebServer;
+using UrlMatch = esphome::UrlMatch;
 
 constexpr const char *MOBILE_API_PREFIX = "/api/mobile/v1";
 

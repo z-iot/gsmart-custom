@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
 #include "esphome/components/web_server_base/web_server_base.h"
+#include "esphome/components/web_server_idf/web_server_idf.h"
 #include "esphome/components/json/json_util.h"
 
 #ifdef USE_LOGGER
@@ -44,22 +45,21 @@
 
 namespace esphome {
 
-namespace web_server_idf {
-class AsyncWebServerRequest;
-class AsyncWebServerResponse;
-class AsyncEventSource;
-class AsyncWebHandler;
-}  // namespace web_server_idf
+struct UrlMatch {
+  StringRef domain;
+  StringRef id;
+  StringRef method;
+  bool valid;
+};
 
 namespace web_server {
 
-class WebServer;
 
-#if USE_ESP32
-using WebServerRequest = web_server_idf::AsyncWebServerRequest;
-using WebServerResponse = web_server_idf::AsyncWebServerResponse;
-using WebEventSource = web_server_idf::AsyncEventSource;
-using WebHandler = web_server_idf::AsyncWebHandler;
+#ifdef USE_ESP32
+using WebServerRequest = ::esphome::web_server_idf::AsyncWebServerRequest;
+using WebServerResponse = ::esphome::web_server_idf::AsyncWebServerResponse;
+using WebEventSource = ::esphome::web_server_idf::AsyncEventSource;
+using WebHandler = ::esphome::web_server_idf::AsyncWebHandler;
 #else
 using WebServerRequest = AsyncWebServerRequest;
 using WebServerResponse = AsyncWebServerResponse;
@@ -69,7 +69,7 @@ using WebHandler = AsyncWebHandler;
 
 class EspServer : public Component, public WebHandler, public ::esphome::Controller {
  public:
-  EspServer(web_server_base::WebServerBase *base, WebServer *parent);
+  EspServer(web_server_base::WebServerBase *base);
 
   void setup() override;
   void loop() override;
@@ -124,7 +124,24 @@ class EspServer : public Component, public WebHandler, public ::esphome::Control
 
  protected:
   web_server_base::WebServerBase *base_;
-  WebServer *parent_;
+  void handle_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_switch_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_button_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_binary_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_fan_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_light_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_text_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_cover_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_number_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_select_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_lock_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+  void handle_climate_request(WebServerRequest *request, const ::esphome::UrlMatch &match);
+
+  std::string sensor_json_(sensor::Sensor *obj, float value);
+  std::string binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value);
+  std::string switch_json_(switch_::Switch *obj, bool value);
+  std::string text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value);
+
   WebEventSource events_;
   bool include_internal_{false};
   bool expose_log_{true};

@@ -1,57 +1,14 @@
 #include "SecurityService.h"
 #include "esphome/components/storage/store.h"
 
+using namespace esphome::web_server_idf;
+
 SecurityService::SecurityService(std::shared_ptr<AsyncWebServer> server) : _jwtHandler(FACTORY_JWT_SECRET)
 {
-  // server->on(ConfigScheduller_PATH, HTTP_GET, std::bind(&ConfigScheduller::get, this, std::placeholders::_1));
-  // // server->on(ConfigScheduller_PATH, HTTP_POST, std::bind(&ConfigScheduller::post, this, std::placeholders::_1));
-  // AsyncCallbackJsonWebHandler *handler = new AsyncCallbackJsonWebHandler(ConfigScheduller_PATH, std::bind(&ConfigScheduller::post, this, std::placeholders::_1, std::placeholders::_2));
-  // handler->setMethod(HTTP_POST);
-  // // handler.setMaxContentLength(MAX_TIME_SIZE);
-  // server->addHandler(handler);
-
-  // addUpdateHandler([&](const String& originId) { configureJWTHandler(); }, false);
 }
-
-// void SecurityService::get(AsyncWebServerRequest *request)
-// {
-
-//   std::string data = esphome::json::build_json([](JsonObject root)
-//                                                { esphome::storage::store->schedule->toJson(root); });
-
-//   request->send(200, "application/json", data.c_str());
-// }
-
-// void SecurityService::post(AsyncWebServerRequest *request, JsonVariant &json)
-// {
-//   if (json.is<JsonObject>())
-//   {
-//     JsonObject root = json.as<JsonObject>();
-//     esphome::storage::store->schedule->reloadFromJson(root);
-
-//     // String username = json["username"];
-//     // String password = json["password"];
-//     // if (authentication.authenticated) {
-//     // User* user = authentication.user;
-//     // AsyncJsonResponse* response = new AsyncJsonResponse(false, MAX_AUTHENTICATION_SIZE);
-//     // JsonObject jsonObject = response->getRoot();
-//     // jsonObject["access_token"] = _securityManager->generateJWT(user);as
-//     // response->setLength();
-//     // request->send(response);
-
-//     std::string data = esphome::json::build_json([](JsonObject root)
-//                                                  { root["xxx"] = "XXXX"; });
-//     request->send(200, "application/json", data.c_str());
-//     return;
-//   }
-
-//   AsyncWebServerResponse *response = request->beginResponse(401);
-//   request->send(response);
-// }
 
 void SecurityService::begin()
 {
-  // _fsPersistence.readFromFS();
   configureJWTHandler();
 }
 
@@ -80,7 +37,7 @@ Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *reque
     }
   }
 #endif
-  else if (request->hasParam(ACCESS_TOKEN_PARAMATER))
+  if (request->hasParam(ACCESS_TOKEN_PARAMATER))
   {
     AsyncWebParameter *tokenParamater = request->getParam(ACCESS_TOKEN_PARAMATER);
     String value(tokenParamater->value().c_str());
@@ -106,17 +63,8 @@ Authentication SecurityService::authenticateJWT(String &jwt)
     String username = parsedPayload["username"];
     if (username == "admin" || username == "service")
       return Authentication(username);
-    // for (User _user : _state.users)
-    // {
-    //   if (_user.username == username && validatePayload(parsedPayload, &_user))
-    //   {
-    //     return Authentication(_user);
-    //   }
-    // }
   }
   return Authentication();
-  // User user = User("admin", "xxx", "customer");
-  // return Authentication(user);
 }
 
 Authentication SecurityService::authenticate(const String &username, const String &password)
@@ -135,7 +83,6 @@ Authentication SecurityService::authenticate(const String &username, const Strin
 inline void populateJWTPayload(JsonObject &payload, String username)
 {
   payload["username"] = username;
-  // payload["role"] = user->role;
 }
 
 boolean SecurityService::validatePayload(JsonObject &parsedPayload, String username)

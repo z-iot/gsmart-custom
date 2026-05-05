@@ -1,5 +1,4 @@
 #include "esp_server.h"
-#include "esphome/components/web_server/web_server.h"
 #include "esphome/core/log.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/application.h"
@@ -53,20 +52,58 @@ static uint32_t diag_heap_min_free() { return 0; }
 
 // Constructor with initialization list
 #ifdef USE_ESP32
-EspServer::EspServer(web_server_base::WebServerBase *base, WebServer *parent) : base_(base), events_("/esp/events", parent) { 
+EspServer::EspServer(web_server_base::WebServerBase *base) : base_(base), events_("/esp/events") { 
   global_esp_server = this; 
 }
 #else
-EspServer::EspServer(web_server_base::WebServerBase *base, WebServer *parent) : base_(base) { 
+EspServer::EspServer(web_server_base::WebServerBase *base) : base_(base) { 
 }
 #endif
 
 void EspServer::setup() {
-  ::esphome::ControllerRegistry::register_controller(this);
+  ControllerRegistry::register_controller(this);
   global_esp_server = this;
   this->base_->add_handler(this);
 
 #ifdef USE_ESP32
+  this->events_.onConnect([this](::esphome::web_server_idf::AsyncEventSourceClient *client) {
+    auto uptime = static_cast<uint32_t>(millis_64() / 1000);
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"title\":\"%s\",\"comment\":\"\",\"ota\":true,\"log\":true,\"lang\":\"en\",\"uptime\":%u}",
+             App.get_friendly_name().empty() ? App.get_name().c_str() : App.get_friendly_name().c_str(),
+             uptime);
+    client->try_send_nodefer(buf, "ping", millis(), 30000);
+
+    // Send initial states for all entities
+#ifdef USE_SENSOR
+    for (auto *obj : App.get_sensors()) {
+      if (!this->include_internal_ && obj->is_internal()) continue;
+      auto json = this->sensor_json_(obj, obj->state);
+      client->try_send_nodefer(json.c_str(), "state");
+    }
+#endif
+#ifdef USE_BINARY_SENSOR
+    for (auto *obj : App.get_binary_sensors()) {
+      if (!this->include_internal_ && obj->is_internal()) continue;
+      auto json = this->binary_sensor_json_(obj, obj->state);
+      client->try_send_nodefer(json.c_str(), "state");
+    }
+#endif
+#ifdef USE_SWITCH
+    for (auto *obj : App.get_switches()) {
+      if (!this->include_internal_ && obj->is_internal()) continue;
+      auto json = this->switch_json_(obj, obj->state);
+      client->try_send_nodefer(json.c_str(), "state");
+    }
+#endif
+#ifdef USE_TEXT_SENSOR
+    for (auto *obj : App.get_text_sensors()) {
+      if (!this->include_internal_ && obj->is_internal()) continue;
+      auto json = this->text_sensor_json_(obj, obj->state);
+      client->try_send_nodefer(json.c_str(), "state");
+    }
+#endif
+  });
   this->base_->add_handler(&this->events_);
 #endif
   this->setup_interval();
@@ -142,25 +179,31 @@ float EspServer::get_setup_priority() const { return setup_priority::WIFI - 1.0f
 
 #ifdef USE_SENSOR
 void EspServer::on_sensor_update(sensor::Sensor *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::sensor_state_json_generator);
+  if (!this->include_internal_ && obj->is_internal()) return;
+  auto json = this->sensor_json_(obj, obj->state);
+  this->events_.try_send_nodefer(json.c_str(), "state");
 }
 #endif
 
 #ifdef USE_BINARY_SENSOR
 void EspServer::on_binary_sensor_update(binary_sensor::BinarySensor *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::binary_sensor_state_json_generator);
+  if (!this->include_internal_ && obj->is_internal()) return;
+  auto json = this->binary_sensor_json_(obj, obj->state);
+  this->events_.try_send_nodefer(json.c_str(), "state");
 }
 #endif
 
 #ifdef USE_SWITCH
 void EspServer::on_switch_update(switch_::Switch *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::switch_state_json_generator);
+  if (!this->include_internal_ && obj->is_internal()) return;
+  auto json = this->switch_json_(obj, obj->state);
+  this->events_.try_send_nodefer(json.c_str(), "state");
 }
 #endif
 
 #ifdef USE_LIGHT
 void EspServer::on_light_update(light::LightState *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::light_state_json_generator);
+  // this->events_.deferrable_send_state(obj, "state", WebServer::light_state_json_generator);
 }
 #endif
 
@@ -178,19 +221,21 @@ void EspServer::on_cover_update(cover::Cover *obj) {
 
 #ifdef USE_TEXT_SENSOR
 void EspServer::on_text_sensor_update(text_sensor::TextSensor *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::text_sensor_state_json_generator);
+  if (!this->include_internal_ && obj->is_internal()) return;
+  auto json = this->text_sensor_json_(obj, obj->state);
+  this->events_.try_send_nodefer(json.c_str(), "state");
 }
 #endif
 
 #ifdef USE_NUMBER
 void EspServer::on_number_update(number::Number *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::number_state_json_generator);
+  // this->events_.deferrable_send_state(obj, "state", WebServer::number_state_json_generator);
 }
 #endif
 
 #ifdef USE_SELECT
 void EspServer::on_select_update(select::Select *obj) {
-  this->events_.deferrable_send_state(obj, "state", WebServer::select_state_json_generator);
+  // this->events_.deferrable_send_state(obj, "state", WebServer::select_state_json_generator);
 }
 #endif
 
@@ -239,7 +284,7 @@ void EspServer::handleRequest(WebServerRequest *request) {
     // Simple segment parser for /domain/id[/method]
     int first_slash = sub_url.indexOf('/', 1);
     if (first_slash != -1) {
-      UrlMatch match{};
+      ::esphome::UrlMatch match{};
       match.domain = StringRef(sub_url.c_str() + 1, first_slash - 1);
       
       int second_slash = sub_url.indexOf('/', first_slash + 1);
@@ -253,7 +298,7 @@ void EspServer::handleRequest(WebServerRequest *request) {
 
 #define HANDLE_DOMAIN(domain_str, handle_method) \
       if (match.domain == domain_str) { \
-        this->parent_->handle_method(request, match); \
+        this->handle_method(request, match); \
         return; \
       }
 
@@ -353,8 +398,7 @@ void EspServer::handle_index_request(WebServerRequest *request) {
 }
 
 void EspServer::close_event_sources(const char *reason) {
-  // Official ESPHome AsyncEventSource does not support close_all().
-  // Connections will be naturally closed when ESP restarts.
+  this->events_.close_all(reason);
 }
 
 #ifdef USE_LOGGER
@@ -369,6 +413,166 @@ void EspServer::on_log(uint8_t level, const char *tag, const char *message, size
   });
   this->events_.try_send_nodefer(data.c_str(), "log");
 #endif
+}
+#endif
+
+#ifdef USE_BUTTON
+void EspServer::handle_button_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_FAN
+void EspServer::handle_fan_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_LIGHT
+void EspServer::handle_light_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_COVER
+void EspServer::handle_cover_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_NUMBER
+void EspServer::handle_number_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_SELECT
+void EspServer::handle_select_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_LOCK
+void EspServer::handle_lock_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+#ifdef USE_CLIMATE
+void EspServer::handle_climate_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  request->send(404);
+}
+#endif
+
+#ifdef USE_SENSOR
+std::string EspServer::sensor_json_(sensor::Sensor *obj, float value) {
+  return json::build_json([obj, value](JsonObject root) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    root["id"] = "sensor-" + std::string(id_buf);
+    
+    if (std::isnan(value)) {
+      root["state"] = "NA";
+    } else {
+      char val_buf[64];
+      value_accuracy_to_buf(val_buf, value, obj->get_accuracy_decimals());
+      root["state"] = std::string(val_buf);
+    }
+    root["value"] = value;
+  });
+}
+#endif
+
+#ifdef USE_BINARY_SENSOR
+std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value) {
+  return json::build_json([obj, value](JsonObject root) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    root["id"] = "binary_sensor-" + std::string(id_buf);
+    root["state"] = value ? "ON" : "OFF";
+    root["value"] = value;
+  });
+}
+#endif
+
+#ifdef USE_SWITCH
+std::string EspServer::switch_json_(switch_::Switch *obj, bool value) {
+  return json::build_json([obj, value](JsonObject root) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    root["id"] = "switch-" + std::string(id_buf);
+    root["state"] = value ? "ON" : "OFF";
+    root["value"] = value;
+  });
+}
+#endif
+
+#ifdef USE_TEXT_SENSOR
+std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value) {
+  return json::build_json([obj, value](JsonObject root) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    root["id"] = "text_sensor-" + std::string(id_buf);
+    root["state"] = value;
+    root["value"] = value;
+  });
+}
+#endif
+
+#ifdef USE_SENSOR
+void EspServer::handle_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  for (auto *obj : App.get_sensors()) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    if (std::string(id_buf) == match.id.c_str()) {
+      auto json = this->sensor_json_(obj, obj->state);
+      request->send(200, "application/json", json.c_str());
+      return;
+    }
+  }
+  request->send(404);
+}
+#endif
+
+#ifdef USE_SWITCH
+void EspServer::handle_switch_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  for (auto *obj : App.get_switches()) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    if (std::string(id_buf) == match.id.c_str()) {
+      if (match.method == "toggle") obj->toggle();
+      else if (match.method == "turn_on") obj->turn_on();
+      else if (match.method == "turn_off") obj->turn_off();
+      
+      auto json = this->switch_json_(obj, obj->state);
+      request->send(200, "application/json", json.c_str());
+      return;
+    }
+  }
+  request->send(404);
+}
+#endif
+
+#ifdef USE_BINARY_SENSOR
+void EspServer::handle_binary_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  for (auto *obj : App.get_binary_sensors()) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    if (std::string(id_buf) == match.id.c_str()) {
+      auto json = this->binary_sensor_json_(obj, obj->state);
+      request->send(200, "application/json", json.c_str());
+      return;
+    }
+  }
+  request->send(404);
+}
+#endif
+
+#ifdef USE_TEXT_SENSOR
+void EspServer::handle_text_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
+  for (auto *obj : App.get_text_sensors()) {
+    char id_buf[128];
+    obj->write_object_id_to(id_buf, sizeof(id_buf));
+    if (std::string(id_buf) == match.id.c_str()) {
+      auto json = this->text_sensor_json_(obj, obj->state);
+      request->send(200, "application/json", json.c_str());
+      return;
+    }
+  }
+  request->send(404);
 }
 #endif
 

@@ -1,5 +1,7 @@
 #include "control_server.h"
 
+using namespace esphome::web_server_idf;
+
 #include "WWWData.h"
 #include "esphome/components/deck_server/payloads.h"
 #include "esphome/components/deck_server/web_helpers.h"
@@ -122,9 +124,9 @@ void ControlServer::setup() {
   register_post_stub(server, "/cfg/def");
 
 #if defined(ENABLE_CORS)
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Credentials", "true");
+  ::esphome::web_server_idf::DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+  ::esphome::web_server_idf::DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization");
+  ::esphome::web_server_idf::DefaultHeaders::Instance().addHeader("Access-Control-Allow-Credentials", "true");
 #endif
 }
 

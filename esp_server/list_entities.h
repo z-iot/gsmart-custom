@@ -8,7 +8,7 @@ class AsyncWebServerRequest;
 }
 
 // Include the official one
-#include "esphome/components/web_server/list_entities.h"
+// #include "esphome/components/api/list_entities.h"
 
 namespace esphome {
 namespace web_server {

@@ -79,6 +79,7 @@ async def to_code(config):
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+    CORE.register_controller()
     cg.add_define("USE_STORAGE")
 
     cg.add(var.set_model(config[CONF_MODEL]))

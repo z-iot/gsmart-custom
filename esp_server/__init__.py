@@ -3,9 +3,10 @@ from __future__ import annotations
 import gzip
 
 import esphome.codegen as cg
-from esphome.components import web_server_base
+from esphome.components import logger, web_server_base
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 import esphome.config_validation as cv
+from esphome.core import CORE
 from esphome.const import (
     CONF_CSS_INCLUDE,
     CONF_CSS_URL,
@@ -24,10 +25,10 @@ from esphome.core import CORE, coroutine_with_priority
 from esphome.components.esp32 import add_idf_sdkconfig_option
 
 AUTO_LOAD = ["json", "web_server_base"]
-DEPENDENCIES = ["web_server"]
+DEPENDENCIES = ["web_server_base"]
 
 web_server_ns = cg.esphome_ns.namespace("web_server")
-EspServer = web_server_ns.class_("EspServer", cg.Component)
+EspServer = web_server_ns.class_("EspServer", cg.Component, cg.Controller)
 
 def default_url(config):
     config = config.copy()
@@ -60,7 +61,6 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
                 web_server_base.WebServerBase
             ),
-            cv.GenerateID(CONF_WEB_SERVER_ID): cv.use_id(web_server_ns.class_("WebServer", cg.Component)),
             cv.Optional(CONF_INCLUDE_INTERNAL, default=False): cv.boolean,
             cv.Optional(CONF_LOG, default=True): cv.boolean,
             # Legacy/ignored fields to keep YAML compatibility
@@ -112,13 +112,16 @@ async def to_code(config):
     add_idf_sdkconfig_option("CONFIG_HTTPD_MAX_REQ_HDR_LEN", 1024)
 
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
-    ws = await cg.get_variable(config[CONF_WEB_SERVER_ID])
-    var = cg.new_Pvariable(config[CONF_ID], paren, ws)
+    var = cg.new_Pvariable(config[CONF_ID], paren)
     await cg.register_component(var, config)
+    CORE.register_controller()
 
     version = config[CONF_VERSION]
     cg.add_define("USE_ESP_SERVER")
     cg.add_define("USE_ESP_SERVER_VERSION", version)
+    cg.add_define("USE_CONTROLLER_REGISTRY")
+    cg.add_define("USE_WEBSERVER")
+    logger.request_log_listener()
     
     if version >= 2:
         add_resource_as_progmem("INDEX_HTML", build_index_html(config), compress=False)
