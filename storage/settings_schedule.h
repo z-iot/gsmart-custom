@@ -69,14 +69,15 @@ namespace esphome
 
       StateUpdateResult fromJson(JsonObject &root) override
       {
-        if (root["enabled"] == false)
-          this->enabled = false;
-        else
-          this->enabled = true;
-        this->schedule.clear();
+        if (root.containsKey("enabled")) {
+          this->enabled = root["enabled"].as<bool>();
+        } else if (root.isNull()) {
+          // Keep default if root is null (e.g. file not found)
+        }
 
         if (root["frames"].is<JsonArray>())
         {
+          this->schedule.clear();
           for (JsonVariant item : root["frames"].as<JsonArray>())
           {
             ScheduleItem itemData;
@@ -91,8 +92,9 @@ namespace esphome
             itemData.to = convertStringToTime(item["t"]);
             this->schedule.push_back(itemData);
           }
+          ESP_LOGI("storage", "Loaded %d schedule frames", this->schedule.size());
+          sort();
         }
-        sort();
         return StateUpdateResult::CHANGED;
       }
 

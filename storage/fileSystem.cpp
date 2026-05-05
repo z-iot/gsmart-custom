@@ -24,13 +24,21 @@ namespace esphome
 #if CONFIG_AUTOSTART_ARDUINO
       disableLoopWDT();
 #endif
-      ESPFS.begin(true);
+      this->ready = ESPFS.begin(true);
+      if (!this->ready) {
+        ESP_LOGE("storage", "Failed to mount SPIFFS!");
+      } else {
+        ESP_LOGI("storage", "SPIFFS mounted successfully.");
+      }
 #if CONFIG_AUTOSTART_ARDUINO
       enableLoopWDT();
 #endif
 #elif defined(ESP8266)
       // ESP.wdtDisable();
-      ESPFS.begin();
+      this->ready = ESPFS.begin();
+      if (!this->ready) {
+        ESP_LOGE("storage", "Failed to mount LittleFS!");
+      }
       // ESP.wdtEnable();
 #endif
     };

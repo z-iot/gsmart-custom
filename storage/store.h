@@ -17,7 +17,9 @@
 #include "data_region.h"
 #include "global.h"
 #include <esphome/components/logger/logger.h>
-#include <string>
+#ifdef GSMART_FEATURE_FILESYSTEM
+#include "fileSystem.h"
+#endif
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/mqtt/mqtt_component.h"
@@ -478,7 +480,7 @@ namespace esphome
       void add_on_change_radiation_mode(std::function<void(RadiationMode)> &&callback) { this->change_radiation_mode_callback_.add(std::move(callback)); }
 
 #ifdef GSMART_FEATURE_FILESYSTEM
-      FileSystem *fileSystem;
+      FileSystem *file_system_;
 #endif
 #ifdef GSMART_FEATURE_SCHEDULE
       SettingsSchedule *schedule;

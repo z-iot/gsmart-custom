@@ -26,11 +26,17 @@ namespace esphome
       {
         fromJson(root); // TODO porovnat stary a novy
         // ESP_LOGW("schedule", "reloadFromJson: %d", schedule.size());
-        saveToFile();
+        if (!saveToFile()) {
+          ESP_LOGE("storage", "Failed to auto-save after reload from JSON");
+        }
       }
 
       bool loadFromFile()
       {
+        if (fileSystem == nullptr) {
+           ESP_LOGE("storage", "FileSystem not initialized, cannot load %s", fileName.c_str());
+           return false;
+        }
         JsonDocument doc;
         if (!fileSystem->readFromFS(fileName.c_str(), doc))
           return false;
@@ -41,6 +47,10 @@ namespace esphome
 
       bool saveToFile()
       {
+        if (fileSystem == nullptr) {
+           ESP_LOGE("storage", "FileSystem not initialized, cannot save %s", fileName.c_str());
+           return false;
+        }
         JsonDocument jsonDocument;
         auto root = jsonDocument.to<JsonObject>();
         toJson(root);

@@ -27,7 +27,7 @@ namespace esphome
       ESP_LOGCONFIG(TAG, "Contructing Store...");
 
 #ifdef GSMART_FEATURE_FILESYSTEM
-      fileSystem = new FileSystem();
+      file_system_ = new FileSystem();
 #endif
 #ifdef GSMART_FEATURE_SCHEDULE
       schedule = new SettingsSchedule();
@@ -47,8 +47,11 @@ namespace esphome
       ESP_LOGCONFIG(TAG, "region member count: %d", region->layout.memberCount);
 #endif
 #ifdef GSMART_FEATURE_SCHEDULE
-      schedule->loadFromFile();
-      ESP_LOGCONFIG(TAG, "schedule size: %d", schedule->schedule.size());
+      if (schedule->loadFromFile()) {
+        ESP_LOGI(TAG, "Schedule loaded successfully (%d items)", schedule->schedule.size());
+      } else {
+        ESP_LOGW(TAG, "No schedule file found or failed to load, using defaults");
+      }
 #endif
 #ifdef GSMART_FEATURE_USAGE
       usage->setup();

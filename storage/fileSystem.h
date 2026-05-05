@@ -25,32 +25,51 @@ namespace esphome
 
       bool readFromFS(const char *filePath, JsonDocument &doc)
       {
+        if (!ready) {
+          ESP_LOGE("storage", "FS not ready, cannot read %s", filePath);
+          return false;
+        }
         File settingsFile = ESPFS.open(filePath, "r");
 
-        if (!settingsFile)
+        if (!settingsFile) {
+          ESP_LOGD("storage", "File not found: %s", filePath);
           return false;
+        }
         DeserializationError error = deserializeJson(doc, settingsFile);
         settingsFile.close();
-        if (error != DeserializationError::Ok || !doc.is<JsonObject>())
+        if (error != DeserializationError::Ok) {
+          ESP_LOGE("storage", "Failed to deserialize %s: %s", filePath, error.c_str());
           return false;
+        }
+        if (!doc.is<JsonObject>()) {
+          ESP_LOGE("storage", "File %s is not a JSON object", filePath);
+          return false;
+        }
         return true;
-
-        // If we reach here we have not been successful in loading the config and hard-coded defaults are now applied.
-        // The settings are then written back to the file system so the defaults persist between resets. This last step is
-        // required as in some cases defaults contain randomly generated values which would otherwise be modified on reset.
-        // applyDefaults();
-        // writeToFS();
       }
 
       bool writeToFS(const char *filePath, JsonObject &root)
       {
-        File settingsFile = ESPFS.open(filePath, "w");
-        if (!settingsFile)
+        if (!ready) {
+          ESP_LOGE("storage", "FS not ready, cannot write %s", filePath);
           return false;
-        serializeJson(root, settingsFile);
+        }
+        File settingsFile = ESPFS.open(filePath, "w");
+        if (!settingsFile) {
+          ESP_LOGE("storage", "Failed to open file for writing: %s", filePath);
+          return false;
+        }
+        size_t bytesWritten = serializeJson(root, settingsFile);
         settingsFile.close();
+        if (bytesWritten == 0) {
+          ESP_LOGE("storage", "Failed to write any data to %s", filePath);
+          return false;
+        }
+        ESP_LOGI("storage", "Saved %s (%d bytes)", filePath, bytesWritten);
         return true;
       }
+
+      bool ready = false;
 
       size_t GetTotalBytes()
       {
