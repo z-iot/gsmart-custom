@@ -6,6 +6,8 @@
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/util.h"
 #include "esphome/components/wifi/wifi_component.h"
+#include "esphome/components/wifi/wifi_component.h"
+#include <esp_wifi.h>
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -172,7 +174,7 @@ void add_wifi_runtime(JsonObject root) {
     return;
 
   root["connected"] = wifi::global_wifi_component->is_connected();
-  root["apActive"] = wifi::global_wifi_component->isApActive();
+  root["apActive"] = esphome::wifi::global_wifi_component->is_ap_active();
   root["signal"] = wifi::global_wifi_component->wifi_rssi();
   root["channel"] = wifi::global_wifi_component->get_wifi_channel();
 
@@ -492,10 +494,14 @@ void apply_network(JsonObject root) {
   if (root["ap"].is<JsonObject>()) {
     JsonObject ap = root["ap"].as<JsonObject>();
     if (!ap["enabled"].isNull()) {
-      if (json_bool(ap["enabled"], wifi::global_wifi_component->isApActive()))
-        wifi::global_wifi_component->enableAp();
+      if (json_bool(ap["enabled"], esphome::wifi::global_wifi_component->is_ap_active()))
+      {
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+      }
       else
-        wifi::global_wifi_component->disableAp();
+      {
+        esp_wifi_set_mode(WIFI_MODE_STA);
+      }
     }
   }
 }

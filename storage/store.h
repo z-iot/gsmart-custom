@@ -21,6 +21,8 @@
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/mqtt/mqtt_component.h"
+#include "esphome/components/wifi/wifi_component.h"
+#include <esp_wifi.h>
 
 
 
@@ -141,7 +143,7 @@ namespace esphome
             res += "W";
         }
 
-        if (wifi::global_wifi_component->isApActive())
+        if (esphome::wifi::global_wifi_component->is_ap_active())
           // AP
           res += "A";
 
