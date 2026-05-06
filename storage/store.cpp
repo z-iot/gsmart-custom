@@ -47,7 +47,7 @@ namespace esphome
       if (file_system_ != nullptr) {
         ESP_LOGE(TAG, "Calling file_system_->setup()...");
         file_system_->setup();
-        ESP_LOGE(TAG, "FileSystem ready: %s", file_system_->ready ? "YES" : "NO");
+        ESP_LOGE(TAG, "FileSystem ready: %s", file_system_->isReady() ? "YES" : "NO");
       } else {
         ESP_LOGE(TAG, "CRITICAL: file_system_ is NULL!");
       }

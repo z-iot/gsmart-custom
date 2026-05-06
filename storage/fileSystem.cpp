@@ -3,6 +3,9 @@
 #ifdef ESP32
 #include <esp32-hal.h>
 #include <errno.h>
+#include "esp_littlefs.h"
+#include <dirent.h>
+#include <sys/stat.h>
 
 extern "C" int __attribute__((weak)) rmdir(const char *path) {
   errno = ENOSYS;
@@ -23,106 +26,104 @@ namespace esphome
 
     void FileSystem::setup()
     {
-      ESP_LOGE("storage", ">>> STARTING LITTLEFS DIAGNOSTICS <<<");
 #ifdef ESP32
-      // 1. Check partition table via ESP-IDF API
-      const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x83, "littlefs");
-      if (part == nullptr) {
-        ESP_LOGE("storage", "DIAG: Partition 'littlefs' (subtype 0x83) NOT FOUND!");
-        part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x82, "littlefs");
-        if (part != nullptr) ESP_LOGE("storage", "DIAG: Found 'littlefs' with SPIFFS subtype (0x82)");
-        else {
-          ESP_LOGE("storage", "DIAG: No partition with label 'littlefs' found at all!");
-        }
+      esp_vfs_littlefs_conf_t conf = {
+        .base_path = "/fs",
+        .partition_label = "spiffs", 
+        .format_if_mount_failed = true,
+        .dont_mount = false,
+      };
+
+      esp_err_t ret = esp_vfs_littlefs_register(&conf);
+      if (ret == ESP_OK) {
+        this->ready = true;
+        ESP_LOGI("storage", "Storage initialized on /fs (Label: spiffs)");
       } else {
-        ESP_LOGE("storage", "DIAG: Partition 'littlefs' found at 0x%08X, size 0x%08X", (int)part->address, (int)part->size);
-      }
-
-      // 2. Attempt mount using /fs as mount point (to avoid /littlefs conflict)
-      ESP_LOGE("storage", "DIAG: Mounting LittleFS at /fs...");
-      this->ready = ESPFS.begin(false, "/fs", 10, "littlefs"); 
-
-      if (!this->ready) {
-        ESP_LOGE("storage", "DIAG: Mount FAILED. Forcing FORMAT now...");
-        uint32_t start_fmt = millis();
-        bool fmt_res = ESPFS.format();
-        uint32_t dur_fmt = millis() - start_fmt;
-        ESP_LOGE("storage", "DIAG: Format took %u ms. Result: %s", (unsigned int)dur_fmt, fmt_res ? "SUCCESS" : "FAIL");
-        
-        ESP_LOGE("storage", "DIAG: Remounting after format...");
-        this->ready = ESPFS.begin(false, "/fs", 10, "littlefs");
-      }
-
-      if (this->ready) {
-        ESP_LOGE("storage", "DIAG: MOUNT SUCCESS! Total: %u, Used: %u", (unsigned int)GetTotalBytes(), (unsigned int)GetUsedBytes());
-        
-        // 3. Persistence verification with immediate read-back
-        ESP_LOGE("storage", "DIAG: Writing test file /diag.txt...");
-        File f = ESPFS.open("/diag.txt", "w");
-        if (f) {
-          f.println("DIAG_OK");
-          f.flush();
-          f.close();
-          ESP_LOGE("storage", "DIAG: File written and closed. Verifying...");
-          
-          File v = ESPFS.open("/diag.txt", "r");
-          if (v) {
-            String content = v.readString();
-            content.trim();
-            ESP_LOGE("storage", "DIAG: Verification SUCCESS! Content: [%s]", content.c_str());
-            v.close();
-          } else {
-            ESP_LOGE("storage", "DIAG: Verification FAILED! Could not open file for read immediately after write.");
-          }
-        } else {
-          ESP_LOGE("storage", "DIAG: Failed to open /diag.txt for writing!");
-        }
-
-        listAllFiles();
-      } else {
-        ESP_LOGE("storage", "DIAG: CRITICAL - LittleFS could not be initialized even after format!");
+        ESP_LOGE("storage", "Storage init failed: %s", esp_err_to_name(ret));
       }
 #elif defined(ESP8266)
-      this->ready = ESPFS.begin();
+      this->ready = LittleFS.begin();
       if (this->ready) {
-        ESP_LOGE("storage", "LittleFS mounted. Total: %d, Used: %d", (int)GetTotalBytes(), (int)GetUsedBytes());
-        listAllFiles();
+        ESP_LOGI("storage", "Storage initialized (LittleFS)");
       } else {
-        ESP_LOGE("storage", "Failed to mount LittleFS!");
+        ESP_LOGE("storage", "Storage init failed!");
       }
+#endif
+    }
+
+    bool FileSystem::exists(const char *filePath)
+    {
+      if (!ready) return false;
+#ifdef ESP32
+      std::string fullPath = "/fs";
+      if (filePath[0] != '/') fullPath += "/";
+      fullPath += filePath;
+      struct stat st;
+      return (stat(fullPath.c_str(), &st) == 0);
+#else
+      return LittleFS.exists(filePath);
+#endif
+    }
+
+    bool FileSystem::remove(const char *filePath)
+    {
+      if (!ready) return false;
+#ifdef ESP32
+      std::string fullPath = "/fs";
+      if (filePath[0] != '/') fullPath += "/";
+      fullPath += filePath;
+      return (unlink(fullPath.c_str()) == 0);
+#else
+      return LittleFS.remove(filePath);
 #endif
     }
 
     void FileSystem::listAllFiles()
     {
-      ESP_LOGE("storage", "Listing files at root:");
+      if (!ready) return;
+      ESP_LOGI("storage", "Listing files:");
 #ifdef ESP32
-      // Try different root paths as some VFS drivers are picky
-      File root = ESPFS.open("/");
-      if (!root) {
-        ESP_LOGD("storage", "Failed to open '/', trying '/.'");
-        root = ESPFS.open("/.");
-      }
-      if (!root) {
-        ESP_LOGD("storage", "Failed to open '/.', trying ''");
-        root = ESPFS.open("");
-      }
-      
-      if (!root) {
-        ESP_LOGE("storage", "Failed to open root directory (tried '/', '/.', '')");
-      } else if (!root.isDirectory()) {
-        ESP_LOGE("storage", "Root path exists but is NOT a directory!");
-        root.close();
-      } else {
-        int count = 0;
-        File file = root.openNextFile();
-        while (file) {
-          ESP_LOGE("storage", "  [%s] - %d bytes", file.name(), (int)file.size());
-          file = root.openNextFile();
-          count++;
+      DIR *dir = opendir("/fs");
+      if (!dir) return;
+      struct dirent *ent;
+      while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type == DT_REG) {
+          ESP_LOGI("storage", "  - %s", ent->d_name);
         }
-        root.close();
-        ESP_LOGE("storage", "Listing done. Total files found: %d", count);
+      }
+      closedir(dir);
+#elif defined(ESP8266)
+      auto dir = LittleFS.openDir("/");
+      while (dir.next()) {
+        ESP_LOGI("storage", "  - %s (%d bytes)", dir.fileName().c_str(), (int)dir.fileSize());
+      }
+#endif
+    }
+
+    void FileSystem::listDir(JsonObject &root)
+    {
+      if (!ready) return;
+#ifdef ESP32
+      DIR *dir = opendir("/fs");
+      if (!dir) return;
+      struct dirent *ent;
+      while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type == DT_REG) {
+          std::string path = "/fs/";
+          path += ent->d_name;
+          struct stat st;
+          if (stat(path.c_str(), &st) == 0) {
+            root[ent->d_name] = (int)st.st_size;
+          } else {
+            root[ent->d_name] = 0;
+          }
+        }
+      }
+      closedir(dir);
+#elif defined(ESP8266)
+      auto dir = LittleFS.openDir("/");
+      while (dir.next()) {
+        root[dir.fileName()] = (int)dir.fileSize();
       }
 #endif
     }
