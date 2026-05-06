@@ -479,12 +479,8 @@ namespace esphome
       void add_on_situation_duration_change(std::function<void()> &&callback) { this->situation_duration_change_callback_.add(std::move(callback)); }
       void add_on_change_radiation_mode(std::function<void(RadiationMode)> &&callback) { this->change_radiation_mode_callback_.add(std::move(callback)); }
 
-#ifdef GSMART_FEATURE_FILESYSTEM
       FileSystem *file_system_;
-#endif
-#ifdef GSMART_FEATURE_SCHEDULE
       SettingsSchedule *schedule;
-#endif
 #ifdef GSMART_FEATURE_REGION
       DataRegion *region = new DataRegion();
 #endif

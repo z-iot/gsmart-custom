@@ -26,12 +26,12 @@ namespace esphome
       store = this;
       ESP_LOGCONFIG(TAG, "Contructing Store...");
 
-#ifdef GSMART_FEATURE_FILESYSTEM
       file_system_ = new FileSystem();
-#endif
-#ifdef GSMART_FEATURE_SCHEDULE
+      ESP_LOGE(TAG, "FileSystem object created");
+
       schedule = new SettingsSchedule();
-#endif
+      ESP_LOGE(TAG, "Schedule object created");
+
       ESP_LOGCONFIG(TAG, "Contructing Store... done");
     };
 
@@ -41,18 +41,31 @@ namespace esphome
 
     void Store::setup()
     {
+      ESP_LOGE(TAG, "--- STORE SETUP START ---");
       ESP_LOGCONFIG(TAG, "Setting up Store...");
+
+      if (file_system_ != nullptr) {
+        ESP_LOGE(TAG, "Calling file_system_->setup()...");
+        file_system_->setup();
+        ESP_LOGE(TAG, "FileSystem ready: %s", file_system_->ready ? "YES" : "NO");
+      } else {
+        ESP_LOGE(TAG, "CRITICAL: file_system_ is NULL!");
+      }
+
 #ifdef GSMART_FEATURE_REGION
       region->setup();
       ESP_LOGCONFIG(TAG, "region member count: %d", region->layout.memberCount);
 #endif
-#ifdef GSMART_FEATURE_SCHEDULE
-      if (schedule->loadFromFile()) {
-        ESP_LOGI(TAG, "Schedule loaded successfully (%d items)", schedule->schedule.size());
+
+      if (schedule != nullptr) {
+        if (schedule->loadFromFile()) {
+          ESP_LOGI(TAG, "Schedule loaded successfully (%d items)", schedule->schedule.size());
+        } else {
+          ESP_LOGW(TAG, "No schedule file found or failed to load, using defaults");
+        }
       } else {
-        ESP_LOGW(TAG, "No schedule file found or failed to load, using defaults");
+        ESP_LOGE(TAG, "CRITICAL: schedule is NULL!");
       }
-#endif
 #ifdef GSMART_FEATURE_USAGE
       usage->setup();
 #endif

@@ -4,14 +4,15 @@
 
 #ifdef ESP32
 #include <FS.h>
-#include <SPIFFS.h>
-#define ESPFS SPIFFS
+#include <LittleFS.h>
+#define ESPFS LittleFS
 #elif defined(ESP8266)
 #include <LittleFS.h>
 #define ESPFS LittleFS
 #endif
 
 #define DEFAULT_BUFFER_SIZE 4096
+#define SCHEDULE_SETTINGS_FILE "/schedule.json"
 
 namespace esphome
 {
@@ -22,6 +23,9 @@ namespace esphome
     {
     public:
       FileSystem();
+
+      void setup();
+      void listAllFiles();
 
       bool readFromFS(const char *filePath, JsonDocument &doc)
       {
@@ -54,19 +58,39 @@ namespace esphome
           ESP_LOGE("storage", "FS not ready, cannot write %s", filePath);
           return false;
         }
+        
+        ensureDirectory(filePath);
+
         File settingsFile = ESPFS.open(filePath, "w");
         if (!settingsFile) {
           ESP_LOGE("storage", "Failed to open file for writing: %s", filePath);
           return false;
         }
         size_t bytesWritten = serializeJson(root, settingsFile);
+        settingsFile.flush();
         settingsFile.close();
         if (bytesWritten == 0) {
-          ESP_LOGE("storage", "Failed to write any data to %s", filePath);
+          ESP_LOGE("storage", "Failed to write any data to %s (serializeJson returned 0)", filePath);
           return false;
         }
-        ESP_LOGI("storage", "Saved %s (%d bytes)", filePath, bytesWritten);
+        ESP_LOGI("storage", "Saved %s (%d bytes)", filePath, (int)bytesWritten);
         return true;
+      }
+
+      void ensureDirectory(const char *filePath)
+      {
+        std::string path = filePath;
+        // Find the last slash to separate directory from filename
+        size_t lastSlash = path.find_last_of('/');
+        if (lastSlash != std::string::npos && lastSlash > 0) {
+          std::string dir = path.substr(0, lastSlash);
+          if (!ESPFS.exists(dir.c_str())) {
+            ESP_LOGD("storage", "Creating directory: %s", dir.c_str());
+            if (!ESPFS.mkdir(dir.c_str())) {
+              ESP_LOGE("storage", "Failed to create directory: %s", dir.c_str());
+            }
+          }
+        }
       }
 
       bool ready = false;
@@ -74,7 +98,7 @@ namespace esphome
       size_t GetTotalBytes()
       {
 #ifdef ESP32
-        return SPIFFS.totalBytes();
+        return ESPFS.totalBytes();
 #elif defined(ESP8266)
         FSInfo fs_info;
         ESPFS.info(fs_info);
@@ -85,7 +109,7 @@ namespace esphome
       size_t GetUsedBytes()
       {
 #ifdef ESP32
-        return SPIFFS.usedBytes();
+        return ESPFS.usedBytes();
 #elif defined(ESP8266)
         FSInfo fs_info;
         ESPFS.info(fs_info);
