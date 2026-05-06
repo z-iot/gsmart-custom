@@ -28,8 +28,8 @@ namespace esphome
 #if CONFIG_AUTOSTART_ARDUINO
       disableLoopWDT();
 #endif
-      // Using default begin() which expects partition named "littlefs"
-      this->ready = ESPFS.begin(true); 
+      // Explicitly passing "littlefs" partition label to avoid default "spiffs" lookup in some versions of the library
+      this->ready = ESPFS.begin(true, "/littlefs", 10, "littlefs"); 
 
       if (!this->ready) {
         ESP_LOGE("storage", "CRITICAL: Failed to mount LittleFS partition!");
@@ -38,19 +38,15 @@ namespace esphome
         
         // Persistence check
         bool persistence_ok = false;
-        if (ESPFS.exists("/persist_test.txt")) {
-          File f = ESPFS.open("/persist_test.txt", "r");
-          if (f) {
-            String content = f.readString();
-            f.close();
-            content.trim();
-            ESP_LOGE("storage", "PERSISTENCE: Found file! Content: [%s]", content.c_str());
-            persistence_ok = true;
-          } else {
-            ESP_LOGE("storage", "PERSISTENCE: File exists but failed to open for read!");
-          }
+        File test_read = ESPFS.open("/persist_test.txt", "r");
+        if (test_read) {
+          String content = test_read.readString();
+          test_read.close();
+          content.trim();
+          ESP_LOGE("storage", "PERSISTENCE: Found file! Content: [%s]", content.c_str());
+          persistence_ok = true;
         } else {
-          ESP_LOGE("storage", "PERSISTENCE: Test file not found. Writing new one...");
+          ESP_LOGE("storage", "PERSISTENCE: Test file not found or failed to open for read. Writing new one...");
           File f = ESPFS.open("/persist_test.txt", "w");
           if (f) {
             f.println("BOOT_SUCCESS");
@@ -58,12 +54,14 @@ namespace esphome
             f.close();
             ESP_LOGE("storage", "PERSISTENCE: Test file written and flushed.");
             
-            // Immediate verification
-            if (ESPFS.exists("/persist_test.txt")) {
+            // Immediate verification using open instead of exists
+            File v = ESPFS.open("/persist_test.txt", "r");
+            if (v) {
               ESP_LOGE("storage", "PERSISTENCE: Verified file exists immediately after write.");
+              v.close();
               persistence_ok = true;
             } else {
-              ESP_LOGE("storage", "PERSISTENCE: ERROR! File does not exist immediately after write!");
+              ESP_LOGE("storage", "PERSISTENCE: ERROR! File does not exist (open failed) immediately after write!");
             }
           } else {
             ESP_LOGE("storage", "PERSISTENCE: Failed to write test file!");
@@ -75,7 +73,7 @@ namespace esphome
           ESP_LOGE("storage", "!!! CRITICAL: Filesystem check failed. FORCING REFORMAT !!!");
           ESPFS.format();
           ESPFS.end();
-          this->ready = ESPFS.begin(true);
+          this->ready = ESPFS.begin(true, "/littlefs", 10, "littlefs");
           if (this->ready) {
             ESP_LOGE("storage", "LittleFS mounted after format. Retrying test write...");
             File f = ESPFS.open("/persist_test.txt", "w");
@@ -109,12 +107,19 @@ namespace esphome
     {
       ESP_LOGE("storage", "Listing files at root:");
 #ifdef ESP32
-      // In Arduino Core 3.x, some FS implementations are picky about the trailing slash or empty paths.
-      // We'll try the most standard way first.
+      // Try different root paths as some VFS drivers are picky
       File root = ESPFS.open("/");
+      if (!root) {
+        ESP_LOGD("storage", "Failed to open '/', trying '/.'");
+        root = ESPFS.open("/.");
+      }
+      if (!root) {
+        ESP_LOGD("storage", "Failed to open '/.', trying ''");
+        root = ESPFS.open("");
+      }
       
       if (!root) {
-        ESP_LOGE("storage", "Failed to open '/' as a file/dir object");
+        ESP_LOGE("storage", "Failed to open root directory (tried '/', '/.', '')");
       } else if (!root.isDirectory()) {
         ESP_LOGE("storage", "Root path exists but is NOT a directory!");
         root.close();
