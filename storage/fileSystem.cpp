@@ -23,75 +23,65 @@ namespace esphome
 
     void FileSystem::setup()
     {
-      ESP_LOGE("storage", ">>> LittleFS setup starting (Default Mount, Part: littlefs) <<<");
+      ESP_LOGE("storage", ">>> STARTING LITTLEFS DIAGNOSTICS <<<");
 #ifdef ESP32
-#if CONFIG_AUTOSTART_ARDUINO
-      disableLoopWDT();
-#endif
-      // Explicitly passing "littlefs" partition label to avoid default "spiffs" lookup in some versions of the library
-      this->ready = ESPFS.begin(true, "/littlefs", 10, "littlefs"); 
+      // 1. Check partition table via ESP-IDF API
+      const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x83, "littlefs");
+      if (part == nullptr) {
+        ESP_LOGE("storage", "DIAG: Partition 'littlefs' (subtype 0x83) NOT FOUND!");
+        part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x82, "littlefs");
+        if (part != nullptr) ESP_LOGE("storage", "DIAG: Found 'littlefs' with SPIFFS subtype (0x82)");
+        else {
+          ESP_LOGE("storage", "DIAG: No partition with label 'littlefs' found at all!");
+        }
+      } else {
+        ESP_LOGE("storage", "DIAG: Partition 'littlefs' found at 0x%08X, size 0x%08X", (int)part->address, (int)part->size);
+      }
+
+      // 2. Attempt mount using /fs as mount point (to avoid /littlefs conflict)
+      ESP_LOGE("storage", "DIAG: Mounting LittleFS at /fs...");
+      this->ready = ESPFS.begin(false, "/fs", 10, "littlefs"); 
 
       if (!this->ready) {
-        ESP_LOGE("storage", "CRITICAL: Failed to mount LittleFS partition!");
-      } else {
-        ESP_LOGE("storage", "LittleFS mounted. Total: %d, Used: %d", (int)GetTotalBytes(), (int)GetUsedBytes());
+        ESP_LOGE("storage", "DIAG: Mount FAILED. Forcing FORMAT now...");
+        uint32_t start_fmt = millis();
+        bool fmt_res = ESPFS.format();
+        uint32_t dur_fmt = millis() - start_fmt;
+        ESP_LOGE("storage", "DIAG: Format took %u ms. Result: %s", (unsigned int)dur_fmt, fmt_res ? "SUCCESS" : "FAIL");
         
-        // Persistence check
-        bool persistence_ok = false;
-        File test_read = ESPFS.open("/persist_test.txt", "r");
-        if (test_read) {
-          String content = test_read.readString();
-          test_read.close();
-          content.trim();
-          ESP_LOGE("storage", "PERSISTENCE: Found file! Content: [%s]", content.c_str());
-          persistence_ok = true;
-        } else {
-          ESP_LOGE("storage", "PERSISTENCE: Test file not found or failed to open for read. Writing new one...");
-          File f = ESPFS.open("/persist_test.txt", "w");
-          if (f) {
-            f.println("BOOT_SUCCESS");
-            f.flush();
-            f.close();
-            ESP_LOGE("storage", "PERSISTENCE: Test file written and flushed.");
-            
-            // Immediate verification using open instead of exists
-            File v = ESPFS.open("/persist_test.txt", "r");
-            if (v) {
-              ESP_LOGE("storage", "PERSISTENCE: Verified file exists immediately after write.");
-              v.close();
-              persistence_ok = true;
-            } else {
-              ESP_LOGE("storage", "PERSISTENCE: ERROR! File does not exist (open failed) immediately after write!");
-            }
-          } else {
-            ESP_LOGE("storage", "PERSISTENCE: Failed to write test file!");
-          }
-        }
-
-        // SELF-HEALING
-        if (!persistence_ok) {
-          ESP_LOGE("storage", "!!! CRITICAL: Filesystem check failed. FORCING REFORMAT !!!");
-          ESPFS.format();
-          ESPFS.end();
-          this->ready = ESPFS.begin(true, "/littlefs", 10, "littlefs");
-          if (this->ready) {
-            ESP_LOGE("storage", "LittleFS mounted after format. Retrying test write...");
-            File f = ESPFS.open("/persist_test.txt", "w");
-            if (f) {
-              f.println("FORMAT_SUCCESS");
-              f.flush();
-              f.close();
-              ESP_LOGE("storage", "PERSISTENCE: Test file written after format.");
-            }
-          }
-        }
-
-        ESP_LOGE("storage", "Usage: Total: %d, Used: %d", (int)GetTotalBytes(), (int)GetUsedBytes());
-        listAllFiles();
+        ESP_LOGE("storage", "DIAG: Remounting after format...");
+        this->ready = ESPFS.begin(false, "/fs", 10, "littlefs");
       }
-#if CONFIG_AUTOSTART_ARDUINO
-      enableLoopWDT();
-#endif
+
+      if (this->ready) {
+        ESP_LOGE("storage", "DIAG: MOUNT SUCCESS! Total: %u, Used: %u", (unsigned int)GetTotalBytes(), (unsigned int)GetUsedBytes());
+        
+        // 3. Persistence verification with immediate read-back
+        ESP_LOGE("storage", "DIAG: Writing test file /diag.txt...");
+        File f = ESPFS.open("/diag.txt", "w");
+        if (f) {
+          f.println("DIAG_OK");
+          f.flush();
+          f.close();
+          ESP_LOGE("storage", "DIAG: File written and closed. Verifying...");
+          
+          File v = ESPFS.open("/diag.txt", "r");
+          if (v) {
+            String content = v.readString();
+            content.trim();
+            ESP_LOGE("storage", "DIAG: Verification SUCCESS! Content: [%s]", content.c_str());
+            v.close();
+          } else {
+            ESP_LOGE("storage", "DIAG: Verification FAILED! Could not open file for read immediately after write.");
+          }
+        } else {
+          ESP_LOGE("storage", "DIAG: Failed to open /diag.txt for writing!");
+        }
+
+        listAllFiles();
+      } else {
+        ESP_LOGE("storage", "DIAG: CRITICAL - LittleFS could not be initialized even after format!");
+      }
 #elif defined(ESP8266)
       this->ready = ESPFS.begin();
       if (this->ready) {
