@@ -69,6 +69,14 @@ namespace esphome
 #ifdef GSMART_FEATURE_USAGE
       usage->setup();
 #endif
+
+      // Set dynamic SoftAP SSID: Gsmart-XXXXXX
+      wifi::WiFiAP ap{};
+      ap.set_ssid("Gsmart-" + this->get_serial());
+      ap.set_password("12345678");
+      wifi::global_wifi_component->set_ap(ap);
+
+      ESP_LOGE(TAG, "--- STORE SETUP END ---");
     }
 
     void Store::dump_config()
