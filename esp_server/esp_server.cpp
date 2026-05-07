@@ -41,7 +41,7 @@ extern const size_t ESPHOME_ESP_SERVER_JS_INCLUDE_SIZE;
 #endif
 
 namespace esphome {
-namespace web_server {
+namespace gsmart_esp_server {
 
 static const char *const TAG = "esp_server";
 
@@ -77,14 +77,9 @@ static uint32_t diag_heap_min_free() { return 0; }
 #endif
 
 // Constructor with initialization list
-#ifdef USE_ESP32
 EspServer::EspServer(web_server_base::WebServerBase *base) : base_(base), events_("/esp/events") { 
   global_esp_server = this; 
 }
-#else
-EspServer::EspServer(web_server_base::WebServerBase *base) : base_(base) { 
-}
-#endif
 
 void EspServer::setup() {
   ControllerRegistry::register_controller(this);
@@ -141,22 +136,22 @@ void EspServer::setup_interval() {
   if (udp_server::udpServer != nullptr) {
     udp_server::udpServer->add_on_neighbor_callback([this](udp_server::DeviceItem *deviceItem) {
 #ifdef USE_ESP32
-      this->events_.try_send_nodefer(deviceItem->toEventMessage().c_str(), "neighbor");
+      this->events_send(deviceItem->toEventMessage().c_str(), "neighbor");
 #endif
     });
     udp_server::udpServer->add_on_control_callback([this](udp_server::PacketControl packet) {
 #ifdef USE_ESP32
-      this->events_.try_send_nodefer(udp_server::packetControlToJsonStr(packet).c_str(), "udp_control");
+      this->events_send(udp_server::packetControlToJsonStr(packet).c_str(), "udp_control");
 #endif
     });
     udp_server::udpServer->add_on_status_callback([this](udp_server::PacketStatus packet) {
 #ifdef USE_ESP32
-      this->events_.try_send_nodefer(udp_server::packetStatusToJsonStr(packet).c_str(), "udp_status");
+      this->events_send(udp_server::packetStatusToJsonStr(packet).c_str(), "udp_status");
 #endif
     });
     udp_server::udpServer->add_on_identity_callback([this](udp_server::PacketIdentity packet) {
 #ifdef USE_ESP32
-      this->events_.try_send_nodefer(udp_server::packetIdentityToJsonStr(packet).c_str(), "udp_identity");
+      this->events_send(udp_server::packetIdentityToJsonStr(packet).c_str(), "udp_identity");
 #endif
     });
   }
@@ -166,7 +161,7 @@ void EspServer::setup_interval() {
   if (storage::store != nullptr) {
     storage::store->add_on_situation_change([this]() {
 #ifdef USE_ESP32
-      this->events_.try_send_nodefer(storage::store->global->situationToJsonStr().c_str(), "situation");
+      this->events_send(storage::store->global->situationToJsonStr().c_str(), "situation");
 #endif
     });
   }
@@ -333,7 +328,9 @@ void EspServer::handle_index_request(WebServerRequest *request) {
 }
 
 void EspServer::close_event_sources(const char *reason) {
+#ifdef USE_ESP32
   this->events_.close_all(reason);
+#endif
 }
 
 #ifdef USE_LOGGER
@@ -343,7 +340,7 @@ void EspServer::on_log(uint8_t level, const char *tag, const char *message, size
     return;
   // Official ESPHome v3 dashboard expects raw message strings for logs
   // Strip ANSI color codes to keep the UI clean
-  this->events_.try_send_nodefer(strip_ansi_colors(message).c_str(), "log", millis());
+  this->events_send(strip_ansi_colors(message).c_str(), "log", millis());
 #endif
 }
 #endif
@@ -351,61 +348,61 @@ void EspServer::on_log(uint8_t level, const char *tag, const char *message, size
 #ifdef USE_SENSOR
 void EspServer::on_sensor_update(sensor::Sensor *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->sensor_json_(obj, obj->state).c_str(), "state", millis());
+  this->events_send(this->sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_BINARY_SENSOR
 void EspServer::on_binary_sensor_update(binary_sensor::BinarySensor *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->binary_sensor_json_(obj, obj->state).c_str(), "state", millis());
+  this->events_send(this->binary_sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_SWITCH
 void EspServer::on_switch_update(switch_::Switch *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->switch_json_(obj, obj->state).c_str(), "state", millis());
+  this->events_send(this->switch_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_TEXT_SENSOR
 void EspServer::on_text_sensor_update(text_sensor::TextSensor *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->text_sensor_json_(obj, obj->state).c_str(), "state", millis());
+  this->events_send(this->text_sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_LIGHT
 void EspServer::on_light_update(light::LightState *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->light_json_(obj).c_str(), "state", millis());
+  this->events_send(this->light_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_FAN
 void EspServer::on_fan_update(fan::Fan *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->fan_json_(obj).c_str(), "state", millis());
+  this->events_send(this->fan_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_COVER
 void EspServer::on_cover_update(cover::Cover *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->cover_json_(obj).c_str(), "state", millis());
+  this->events_send(this->cover_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_NUMBER
 void EspServer::on_number_update(number::Number *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->number_json_(obj, obj->state).c_str(), "state", millis());
+  this->events_send(this->number_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_SELECT
 void EspServer::on_select_update(select::Select *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->select_json_(obj, obj->current_option()).c_str(), "state", millis());
+  this->events_send(this->select_json_(obj, obj->current_option()).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_CLIMATE
 void EspServer::on_climate_update(climate::Climate *obj) {
   if (this->events_.count() == 0) return;
-  this->events_.try_send_nodefer(this->climate_json_(obj).c_str(), "state", millis());
+  this->events_send(this->climate_json_(obj).c_str(), "state", millis());
 }
 #endif
 
@@ -937,48 +934,48 @@ void EspServer::handle_text_sensor_request(WebServerRequest *request, const ::es
 #ifdef USE_BINARY_SENSOR
 bool EspServer::on_binary_sensor(binary_sensor::BinarySensor *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->binary_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->binary_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_LIGHT
 bool EspServer::on_light(light::LightState *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 4096) return false;
-  this->events_.try_send_nodefer(this->light_json_(obj, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 4096) return false;
+  this->events_send(this->light_json_(obj, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_FAN
 bool EspServer::on_fan(fan::Fan *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 4096) return false;
-  this->events_.try_send_nodefer(this->fan_json_(obj, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 4096) return false;
+  this->events_send(this->fan_json_(obj, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_COVER
 bool EspServer::on_cover(cover::Cover *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 4096) return false;
-  this->events_.try_send_nodefer(this->cover_json_(obj, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 4096) return false;
+  this->events_send(this->cover_json_(obj, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_SENSOR
 bool EspServer::on_sensor(sensor::Sensor *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->sensor_json_(obj, obj->state, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_SWITCH
 bool EspServer::on_switch(switch_::Switch *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->switch_json_(obj, obj->state, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->switch_json_(obj, obj->state, true).c_str(), "state", millis());
   return true;
 }
 #endif
@@ -988,32 +985,32 @@ bool EspServer::on_button(button::Button *obj) { return true; }
 #ifdef USE_TEXT_SENSOR
 bool EspServer::on_text_sensor(text_sensor::TextSensor *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->text_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->text_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_CLIMATE
 bool EspServer::on_climate(climate::Climate *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 4096) return false;
-  this->events_.try_send_nodefer(this->climate_json_(obj, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 4096) return false;
+  this->events_send(this->climate_json_(obj, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_NUMBER
 bool EspServer::on_number(number::Number *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->number_json_(obj, obj->state, true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->number_json_(obj, obj->state, true).c_str(), "state", millis());
   return true;
 }
 #endif
 #ifdef USE_SELECT
 bool EspServer::on_select(select::Select *obj) {
   if (this->events_.count() == 0) return true;
-  if (this->events_.buffered_bytes() > 2048) return false;
-  this->events_.try_send_nodefer(this->select_json_(obj, obj->current_option(), true).c_str(), "state", millis());
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->select_json_(obj, obj->current_option(), true).c_str(), "state", millis());
   return true;
 }
 #endif
@@ -1049,5 +1046,21 @@ bool EspServer::on_event(event::Event *obj) { return true; }
 bool EspServer::on_update(update::UpdateEntity *obj) { return true; }
 #endif
 
-}  // namespace web_server
+void EspServer::events_send(const char *message, const char *event, uint32_t id) {
+#ifdef USE_ESP32
+  this->events_.try_send_nodefer(message, event, id);
+#else
+  this->events_.send(message, event, id);
+#endif
+}
+
+size_t EspServer::events_buffered_bytes() {
+#ifdef USE_ESP32
+  return this->events_.buffered_bytes();
+#else
+  return 0;
+#endif
+}
+
+}  // namespace gsmart_esp_server
 }  // namespace esphome

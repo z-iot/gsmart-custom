@@ -24,7 +24,9 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/mqtt/mqtt_component.h"
 #include "esphome/components/wifi/wifi_component.h"
+#ifdef USE_ESP32
 #include <esp_wifi.h>
+#endif
 
 
 

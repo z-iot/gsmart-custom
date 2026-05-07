@@ -3,7 +3,9 @@
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
 #include "esphome/components/web_server_base/web_server_base.h"
+#ifdef USE_ESP32
 #include "esphome/components/web_server_idf/web_server_idf.h"
+#endif
 #include "esphome/components/json/json_util.h"
 
 #ifdef USE_LOGGER
@@ -59,7 +61,7 @@ struct UrlMatch {
   bool valid;
 };
 
-namespace web_server {
+namespace gsmart_esp_server {
 
 
 #ifdef USE_ESP32
@@ -234,6 +236,9 @@ class EspServer : public Component, public WebHandler, public ::esphome::Control
   std::string climate_json_(climate::Climate *obj, bool include_metadata = false);
 #endif
 
+  void events_send(const char *message, const char *event = nullptr, uint32_t id = 0);
+  size_t events_buffered_bytes();
+
   WebEventSource events_;
   bool include_internal_{false};
   bool expose_log_{true};
@@ -241,5 +246,5 @@ class EspServer : public Component, public WebHandler, public ::esphome::Control
 
 extern EspServer *global_esp_server;
 
-}  // namespace web_server
+}  // namespace gsmart_esp_server
 }  // namespace esphome

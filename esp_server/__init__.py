@@ -27,7 +27,7 @@ from esphome.components.esp32 import add_idf_sdkconfig_option
 AUTO_LOAD = ["json", "web_server_base"]
 DEPENDENCIES = ["web_server_base"]
 
-web_server_ns = cg.esphome_ns.namespace("web_server")
+web_server_ns = cg.esphome_ns.namespace("gsmart_esp_server")
 EspServer = web_server_ns.class_("EspServer", cg.Component, cg.Controller)
 
 def default_url(config):
@@ -109,7 +109,8 @@ def add_resource_as_progmem(
 @coroutine_with_priority(40.0)
 async def to_code(config):
     # Increase the maximum supported size of headers section in HTTP request packet to be processed by the server
-    add_idf_sdkconfig_option("CONFIG_HTTPD_MAX_REQ_HDR_LEN", 1024)
+    if CORE.is_esp32:
+        add_idf_sdkconfig_option("CONFIG_HTTPD_MAX_REQ_HDR_LEN", 1024)
 
     paren = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
     var = cg.new_Pvariable(config[CONF_ID], paren)

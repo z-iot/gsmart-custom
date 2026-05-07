@@ -9,6 +9,8 @@
 namespace esphome {
 namespace stm32 {
 
+using esphome::web_server_idf::AsyncWebServerResponse;
+
 static const char *const OTA_TAG = "stm32otaHandler";
 
 void report_ota_error()
