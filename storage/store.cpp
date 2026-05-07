@@ -1,8 +1,10 @@
 // #ifdef USE_ARDUINO
 
 #include "store.h"
-// #include "esphome/core/log.h"
-// #include "esphome/core/application.h"
+#include "esphome/core/log.h"
+#include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
+#include "esphome/components/mqtt/mqtt_client.h"
 // #include "esphome/core/entity_base.h"
 // #include "esphome/core/util.h"
 // #include "esphome/components/json/json_util.h"
@@ -70,11 +72,33 @@ namespace esphome
       usage->setup();
 #endif
 
-      // Set dynamic SoftAP SSID: Gsmart-XXXXXX
-      wifi::WiFiAP ap{};
-      ap.set_ssid("Gsmart-" + this->get_serial());
-      ap.set_password("12345678");
-      wifi::global_wifi_component->set_ap(ap);
+      // Dynamic naming logic
+      std::string serial = str_lower_case(this->get_serial());
+      std::string model = this->get_model();
+
+      // 1. Set dynamic identity (e.g. mobi/b80175)
+      // This affects MQTT topic prefix. Note: App.name is set early and cannot be changed here.
+      std::string mqtt_prefix = model + "/" + serial;
+#ifdef USE_MQTT
+      if (mqtt::global_mqtt_client != nullptr) {
+        mqtt::global_mqtt_client->set_topic_prefix(mqtt_prefix, mqtt_prefix);
+        ESP_LOGI(TAG, "Dynamic MQTT topic prefix set to: %s", mqtt_prefix.c_str());
+      } else {
+        ESP_LOGW(TAG, "MQTT client not found, skipping topic prefix setting");
+      }
+#endif
+
+#ifdef USE_WIFI
+      if (wifi::global_wifi_component != nullptr) {
+        wifi::WiFiAP ap = wifi::global_wifi_component->get_ap();
+        std::string ssid = "Gsmart-" + serial;
+        ap.set_ssid(ssid);
+        wifi::global_wifi_component->set_ap(ap);
+        ESP_LOGI(TAG, "SoftAP SSID configured in WiFiComponent: %s", ssid.c_str());
+      } else {
+        ESP_LOGE(TAG, "WiFiComponent not found, cannot set SoftAP SSID");
+      }
+#endif
 
       ESP_LOGE(TAG, "--- STORE SETUP END ---");
     }
