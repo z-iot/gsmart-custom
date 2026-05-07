@@ -69,6 +69,40 @@ namespace esphome
       const std::string get_model() { return this->_model; }
       uint8_t get_model_num() { return this->_model_num; }
       const std::string get_serial() { return esphome::get_mac_address().substr(6); }
+      
+      void set_wifi_ap_active(bool active) {
+#ifdef USE_ESP32
+        if (active) {
+          std::string serial = this->get_serial();
+          std::string ssid = "Gsmart-" + serial;
+          ESP_LOGI("wifi", "Enabling AP mode via low-level API. SSID: %s", ssid.c_str());
+          
+          wifi_config_t conf;
+          if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK) {
+            size_t len = std::min(ssid.size(), (size_t)31);
+            memcpy(conf.ap.ssid, ssid.c_str(), len);
+            conf.ap.ssid[len] = 0;
+            conf.ap.ssid_len = len;
+            esp_wifi_set_config(WIFI_IF_AP, &conf);
+          }
+          esp_wifi_set_mode(WIFI_MODE_APSTA);
+        } else {
+          ESP_LOGI("wifi", "Disabling AP mode via low-level API.");
+          esp_wifi_set_mode(WIFI_MODE_STA);
+        }
+#elif defined(USE_ESP8266)
+        if (active) {
+          std::string serial = this->get_serial();
+          std::string ssid = "Gsmart-" + serial;
+          ESP_LOGI("wifi", "Enabling AP mode (ESP8266). SSID: %s", ssid.c_str());
+          WiFi.softAP(ssid.c_str(), "12345678");
+          WiFi.mode(WIFI_AP_STA);
+        } else {
+          ESP_LOGI("wifi", "Disabling AP mode (ESP8266).");
+          WiFi.mode(WIFI_STA);
+        }
+#endif
+      }
 
       void mqttConnect()
       {

@@ -500,14 +500,8 @@ void apply_network(JsonObject root) {
   if (root["ap"].is<JsonObject>()) {
     JsonObject ap = root["ap"].as<JsonObject>();
     if (!ap["enabled"].isNull()) {
-      if (json_bool(ap["enabled"], esphome::wifi::global_wifi_component->is_ap_active()))
-      {
-        esp_wifi_set_mode(WIFI_MODE_APSTA);
-      }
-      else
-      {
-        esp_wifi_set_mode(WIFI_MODE_STA);
-      }
+      bool active = json_bool(ap["enabled"], esphome::wifi::global_wifi_component->is_ap_active());
+      storage::store->set_wifi_ap_active(active);
     }
   }
 }
