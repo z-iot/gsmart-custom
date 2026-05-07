@@ -72,23 +72,78 @@ namespace esphome
       
       void set_wifi_ap_active(bool active) {
 #ifdef USE_ESP32
+        wifi_mode_t current_mode = WIFI_MODE_NULL;
+        esp_err_t err = esp_wifi_get_mode(&current_mode);
+
+        if (err != ESP_OK) {
+          ESP_LOGE("wifi", "esp_wifi_get_mode failed: %s", esp_err_to_name(err));
+          return;
+        }
+
+        bool sta_enabled = current_mode == WIFI_MODE_STA || current_mode == WIFI_MODE_APSTA;
+        bool ap_enabled  = current_mode == WIFI_MODE_AP  || current_mode == WIFI_MODE_APSTA;
+
         if (active) {
           std::string serial = this->get_serial();
           std::string ssid = "Gsmart-" + serial;
-          ESP_LOGI("wifi", "Enabling AP mode via low-level API. SSID: %s", ssid.c_str());
-          
-          wifi_config_t conf;
-          if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK) {
-            size_t len = std::min(ssid.size(), (size_t)31);
-            memcpy(conf.ap.ssid, ssid.c_str(), len);
-            conf.ap.ssid[len] = 0;
-            conf.ap.ssid_len = len;
-            esp_wifi_set_config(WIFI_IF_AP, &conf);
+
+          if (ssid.size() > 32) {
+            ssid.resize(32);
           }
-          esp_wifi_set_mode(WIFI_MODE_APSTA);
+
+          ESP_LOGI("wifi", "Enabling AP without WiFi restart. SSID: %s", ssid.c_str());
+
+          wifi_config_t conf;
+          memset(&conf, 0, sizeof(conf));
+
+          memcpy(reinterpret_cast<char *>(conf.ap.ssid), ssid.c_str(), ssid.size());
+          conf.ap.ssid_len = ssid.size();
+
+          const char *password = "12345678";
+          memcpy(reinterpret_cast<char *>(conf.ap.password), password, strlen(password));
+
+          conf.ap.channel = 1;
+          conf.ap.ssid_hidden = 0;
+          conf.ap.max_connection = 4;
+          conf.ap.beacon_interval = 100;
+          conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
+          conf.ap.pairwise_cipher = WIFI_CIPHER_TYPE_CCMP;
+
+          // Dôležité: najprv zapnúť AP časť, ale STA nechať bežať
+          wifi_mode_t new_mode = sta_enabled ? WIFI_MODE_APSTA : WIFI_MODE_AP;
+
+          err = esp_wifi_set_mode(new_mode);
+          if (err != ESP_OK) {
+            ESP_LOGE("wifi", "esp_wifi_set_mode(%d) failed: %s", new_mode, esp_err_to_name(err));
+            return;
+          }
+
+          // Potom nastaviť AP konfiguráciu
+          err = esp_wifi_set_config(WIFI_IF_AP, &conf);
+          if (err != ESP_OK) {
+            ESP_LOGE("wifi", "esp_wifi_set_config(WIFI_IF_AP) failed: %s", esp_err_to_name(err));
+            return;
+          }
+
+          ESP_LOGI("wifi", "AP enabled: %s", ssid.c_str());
+
         } else {
-          ESP_LOGI("wifi", "Disabling AP mode via low-level API.");
-          esp_wifi_set_mode(WIFI_MODE_STA);
+          ESP_LOGI("wifi", "Disabling AP without WiFi restart.");
+
+          if (!ap_enabled) {
+            ESP_LOGI("wifi", "AP already disabled.");
+            return;
+          }
+
+          wifi_mode_t new_mode = sta_enabled ? WIFI_MODE_STA : WIFI_MODE_NULL;
+
+          err = esp_wifi_set_mode(new_mode);
+          if (err != ESP_OK) {
+            ESP_LOGE("wifi", "esp_wifi_set_mode(%d) failed: %s", new_mode, esp_err_to_name(err));
+            return;
+          }
+
+          ESP_LOGI("wifi", "AP disabled.");
         }
 #elif defined(USE_ESP8266)
         if (active) {
