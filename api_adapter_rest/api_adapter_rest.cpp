@@ -69,11 +69,11 @@ void ApiAdapterRest::setup() {
 
   // Scheduler
   deck_server::on(server, (base_path + "/scheduler").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [](JsonObject root) { storage::store->schedule->toJson(root); });
+    send_json(request, [this](JsonObject root) { this->core_->build_scheduler(root); });
   });
   deck_server::on_post_json(server, (base_path + "/scheduler").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    storage::store->schedule->reloadFromJson(root);
-    send_ok(request, [](JsonObject res) { res["saved"] = true; });
+    bool ok = this->core_->apply_scheduler(root);
+    send_ok(request, [ok](JsonObject res) { res["saved"] = ok; });
   });
 
   // Region

@@ -53,8 +53,32 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
       this->publish_response_("control/mode/res", rid, [this, root](JsonObject res) { this->core_->handle_control_mode(root, res); });
     } else if (sub_topic == "control/identify/set") {
       this->publish_response_("control/identify/res", rid, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });
+    } else if (sub_topic == "scheduler/get") {
+      this->publish_response_("scheduler/state", rid, [this](JsonObject res) { this->core_->build_scheduler(res); });
+    } else if (sub_topic == "scheduler/set") {
+      bool ok = this->core_->apply_scheduler(root);
+      this->publish_response_("scheduler/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+    } else if (sub_topic == "scheduler/state/set") {
+      bool ok = this->core_->apply_scheduler_state(root);
+      this->publish_response_("scheduler/state/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+    } else if (sub_topic == "network/get") {
+      this->publish_response_("network/state", rid, [this](JsonObject res) { this->core_->build_network(res); });
+    } else if (sub_topic == "network/set") {
+      bool ok = this->core_->apply_network(root);
+      this->publish_response_("network/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+    } else if (sub_topic == "network/mqtt/get") {
+      this->publish_response_("network/mqtt/state", rid, [this](JsonObject res) { this->core_->build_mqtt(res); });
+    } else if (sub_topic == "region/get") {
+      this->publish_response_("region/state", rid, [this](JsonObject res) { this->core_->build_region(res); });
+    } else if (sub_topic == "region/set") {
+      bool ok = this->core_->apply_region(root);
+      this->publish_response_("region/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+    } else if (sub_topic == "region/devices/get") {
+      this->publish_response_("region/devices/state", rid, [this](JsonObject res) { this->core_->build_region_devices(res); });
+    } else if (sub_topic == "region/ping/set") {
+      this->core_->ping_region();
+      this->publish_response_("region/ping/res", rid, [](JsonObject res) { res["ok"] = true; });
     }
-    // Add more handlers as needed
     return true;
   });
 }

@@ -595,8 +595,48 @@ void ApiCoreV1::build_region_devices(JsonObject root) {
 
 void ApiCoreV1::ping_region() {
 #ifdef USE_UDPSERVER
-  udp_server::udpServer->sendPingReq();
+  if (udp_server::udpServer != nullptr)
+    udp_server::udpServer->sendPingReq();
 #endif
+}
+
+void ApiCoreV1::build_scheduler(JsonObject root) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  if (storage::store->schedule != nullptr) {
+    storage::store->schedule->toJson(root);
+    root["enabled"] = storage::store->schedule->enabled;
+    root["itemsCount"] = storage::store->schedule->schedule.size();
+  } else {
+    root["enabled"] = false;
+    root["frames"].to<JsonArray>();
+  }
+#else
+  root["enabled"] = false;
+  root["frames"].to<JsonArray>();
+#endif
+}
+
+bool ApiCoreV1::apply_scheduler(JsonObject root) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  if (storage::store->schedule != nullptr) {
+    storage::store->schedule->reloadFromJson(root);
+    storage::store->schedule->save();
+    return true;
+  }
+#endif
+  return false;
+}
+
+bool ApiCoreV1::apply_scheduler_state(JsonObject root) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  if (storage::store->schedule != nullptr && !root["enabled"].isNull()) {
+    bool enabled = json_bool(root["enabled"], storage::store->schedule->enabled);
+    storage::store->schedule->enabled = enabled;
+    storage::store->schedule->save();
+    return true;
+  }
+#endif
+  return false;
 }
 
 bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
