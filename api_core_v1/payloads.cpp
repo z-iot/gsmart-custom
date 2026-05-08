@@ -214,19 +214,19 @@ void config_security_json(JsonObject root) {
 }
 
 void config_consumable_json(JsonObject root) {
-  JsonObject lampA = root["lampA"].to<JsonObject>();
-  lampA["durability-max"] = 8000;
-  lampA["power"] = 35;
-  lampA["durability-current"] = 1234;
-  lampA["switching-current"] = 555;
-  lampA["reset-last"] = "22-01-05";
-
-  JsonObject lampB = root["lampB"].to<JsonObject>();
-  lampB["durability-max"] = 8000;
-  lampB["power"] = 35;
-  lampB["durability-current"] = 1234;
-  lampB["switching-current"] = 555;
-  lampB["reset-last"] = "22-02-15";
+  if (esphome::storage::store == nullptr || esphome::storage::store->usage == nullptr) {
+    return;
+  }
+  for (int i = 0; i < DEVICE_MAX_LAMP; i++) {
+    std::string key = (i == 0) ? "lampA" : ((i == 1) ? "lampB" : (std::string("lamp") + std::to_string(i)));
+    JsonObject lampJson = root[key].to<JsonObject>();
+    auto &pref = esphome::storage::store->usage->lamp[i].pref;
+    lampJson["durability-max"] = pref.lastExchangeLiveHour;
+    lampJson["power"] = pref.powerWatts;
+    lampJson["durability-current"] = pref.onSec / 3600;
+    lampJson["switching-current"] = pref.startCount;
+    lampJson["reset-last"] = pref.lastExchangeDate;
+  }
 }
 
 void config_connect_json(JsonObject root) {

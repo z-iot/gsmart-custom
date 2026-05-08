@@ -47,6 +47,7 @@ namespace esphome
       uint16_t stopCount = 0;
       uint32_t lastExchangeDate = 0;
       uint32_t lastExchangeLiveHour = 8000;
+      uint16_t powerWatts = 35;
     };
 
     struct UsageLamp
@@ -152,15 +153,17 @@ namespace esphome
           {
             auto lmp = root[lampName].as<JsonObject>();
             if (!lmp["onSec"].isNull())
-              lamp[i].pref.onSec = root["onSec"].as<uint32_t>();
+              lamp[i].pref.onSec = lmp["onSec"].as<uint32_t>();
             if (!lmp["startCount"].isNull())
-              lamp[i].pref.startCount = root["startCount"].as<uint32_t>();
+              lamp[i].pref.startCount = lmp["startCount"].as<uint32_t>();
             if (!lmp["stopCount"].isNull())
-              lamp[i].pref.onSec = root["stopCount"].as<uint32_t>();
+              lamp[i].pref.stopCount = lmp["stopCount"].as<uint32_t>();
             if (!lmp["lastExchangeDate"].isNull())
-              lamp[i].pref.lastExchangeDate = root["lastExchangeDate"].as<uint32_t>();
+              lamp[i].pref.lastExchangeDate = lmp["lastExchangeDate"].as<uint32_t>();
             if (!lmp["lastExchangeLiveHour"].isNull())
-              lamp[i].pref.lastExchangeLiveHour = root["lastExchangeLiveHour"].as<uint32_t>();
+              lamp[i].pref.lastExchangeLiveHour = lmp["lastExchangeLiveHour"].as<uint32_t>();
+            if (!lmp["powerWatts"].isNull())
+              lamp[i].pref.powerWatts = lmp["powerWatts"].as<uint16_t>();
           }
         }
       }

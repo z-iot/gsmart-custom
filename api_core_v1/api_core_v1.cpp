@@ -817,5 +817,53 @@ bool ApiCoreV1::handle_api_manual_control(JsonObject root, JsonObject response) 
   return true;
 }
 
+// --- Settings: Consumables ---
+void ApiCoreV1::build_settings_consumables(JsonObject root) {
+  if (storage::store == nullptr || storage::store->usage == nullptr) return;
+  for (int i = 0; i < DEVICE_MAX_LAMP; i++) {
+    std::string key = (i == 0) ? "lampA" : ((i == 1) ? "lampB" : (std::string("lamp") + std::to_string(i)));
+    JsonObject lampJson = root[key].to<JsonObject>();
+    auto &pref = storage::store->usage->lamp[i].pref;
+    lampJson["maxHours"] = pref.lastExchangeLiveHour;
+    lampJson["powerWatts"] = pref.powerWatts;
+    lampJson["burnedHours"] = pref.onSec / 3600;
+    lampJson["firstUseDate"] = pref.lastExchangeDate;
+  }
+}
+
+bool ApiCoreV1::apply_settings_consumables(JsonObject root) {
+  if (storage::store == nullptr || storage::store->usage == nullptr) return false;
+  bool changed = false;
+  for (int i = 0; i < DEVICE_MAX_LAMP; i++) {
+    std::string key = (i == 0) ? "lampA" : ((i == 1) ? "lampB" : (std::string("lamp") + std::to_string(i)));
+    if (!root[key].isNull()) {
+      auto lmp = root[key].as<JsonObject>();
+      auto &pref = storage::store->usage->lamp[i].pref;
+      if (!lmp["maxHours"].isNull()) pref.lastExchangeLiveHour = lmp["maxHours"].as<uint32_t>();
+      if (!lmp["powerWatts"].isNull()) pref.powerWatts = lmp["powerWatts"].as<uint16_t>();
+      if (!lmp["burnedHours"].isNull()) pref.onSec = lmp["burnedHours"].as<uint32_t>() * 3600;
+      if (!lmp["firstUseDate"].isNull()) pref.lastExchangeDate = lmp["firstUseDate"].as<uint32_t>();
+      changed = true;
+    }
+  }
+  if (changed) {
+    storage::store->usage->save();
+  }
+  return changed;
+}
+
+// --- Settings: Modes ---
+void ApiCoreV1::build_settings_modes(JsonObject root) {
+  if (storage::store == nullptr || storage::store->settingsMode == nullptr) return;
+  storage::store->settingsMode->toJson(root);
+}
+
+bool ApiCoreV1::apply_settings_modes(JsonObject root) {
+  if (storage::store == nullptr || storage::store->settingsMode == nullptr) return false;
+  storage::store->settingsMode->fromJson(root);
+  storage::store->settingsMode->saveToFile();
+  return true;
+}
+
 }  // namespace api_core_v1
 }  // namespace esphome

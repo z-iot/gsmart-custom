@@ -45,6 +45,12 @@ class ApiCoreV1 : public Component {
   bool apply_scheduler(JsonObject root);
   bool apply_scheduler_state(JsonObject root);
 
+  // Settings
+  void build_settings_consumables(JsonObject root);
+  bool apply_settings_consumables(JsonObject root);
+  void build_settings_modes(JsonObject root);
+  bool apply_settings_modes(JsonObject root);
+
   // Control
   bool handle_control_mode(JsonObject root, JsonObject response);
   void handle_identify(JsonObject root, JsonObject response);

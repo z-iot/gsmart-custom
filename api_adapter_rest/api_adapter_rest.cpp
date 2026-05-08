@@ -89,6 +89,24 @@ void ApiAdapterRest::setup() {
     send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
   });
 
+  // Settings: Consumables (lamp hours, power, etc.)
+  web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+    send_json(request, [this](JsonObject root) { this->core_->build_settings_consumables(root); });
+  });
+  web_server_base::on_post_json(server, (base_path + "/settings/consumables").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+    bool saved = this->core_->apply_settings_consumables(root);
+    send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
+  });
+
+  // Settings: Modes (min/std/max timing config)
+  web_server_base::on(server, (base_path + "/settings/modes").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+    send_json(request, [this](JsonObject root) { this->core_->build_settings_modes(root); });
+  });
+  web_server_base::on_post_json(server, (base_path + "/settings/modes").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+    bool saved = this->core_->apply_settings_modes(root);
+    send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
+  });
+
   // Aliases (for backward compatibility)
   web_server_base::on(server, "/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
     send_json(request, [this](JsonObject root) { this->core_->build_status(root); });

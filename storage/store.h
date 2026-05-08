@@ -16,6 +16,8 @@
 #include "data_usage.h"
 #include "data_region.h"
 #include "global.h"
+#include "settings_mode.h"
+#include "settings_device.h"
 #include <esphome/components/logger/logger.h>
 #ifdef GSMART_FEATURE_FILESYSTEM
 #include "fileSystem.h"
@@ -593,6 +595,8 @@ namespace esphome
       DataUsage *usage = new DataUsage();
 #endif
       DataGlobal *global = new DataGlobal();
+      SettingsMode *settingsMode = new SettingsMode();
+      SettingsDevice *settingsDevice = new SettingsDevice();
 
     protected:
       std::string _model;

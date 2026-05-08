@@ -72,6 +72,22 @@ namespace esphome
       usage->setup();
 #endif
 
+      if (settingsMode != nullptr) {
+        if (settingsMode->loadFromFile()) {
+          ESP_LOGI(TAG, "Mode settings loaded successfully");
+        } else {
+          ESP_LOGW(TAG, "No mode settings file found or failed to load, using defaults");
+        }
+      }
+      
+      if (settingsDevice != nullptr) {
+        if (settingsDevice->loadFromFile()) {
+          ESP_LOGI(TAG, "Device settings loaded successfully");
+        } else {
+          ESP_LOGW(TAG, "No device settings file found or failed to load, using defaults");
+        }
+      }
+
       // Dynamic naming logic
       std::string serial = str_lower_case(this->get_serial());
       std::string model = this->get_model();
