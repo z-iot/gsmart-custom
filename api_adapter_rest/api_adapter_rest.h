@@ -13,7 +13,7 @@ class ApiAdapterRest : public Component {
       : base_(base), core_(core) {}
 
   void setup() override;
-  float get_setup_priority() const override { return setup_priority::WIFI - 0.5f; }
+  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
  protected:
   web_server_base::WebServerBase *base_;

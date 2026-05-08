@@ -26,6 +26,10 @@ void send_ok(AsyncWebServerRequest *request, std::function<void(JsonObject)> ext
 
 void ApiAdapterRest::setup() {
   std::shared_ptr<AsyncWebServer> server(this->base_->get_server(), [](AsyncWebServer *) {});
+  if (!server) {
+    ESP_LOGE("api_adapter_rest", "Web server not initialized, skipping REST API setup");
+    return;
+  }
   std::string base_path = "/api/mobile/" + this->core_->get_version_path();
 
   // GET Info

@@ -620,7 +620,6 @@ bool ApiCoreV1::apply_scheduler(JsonObject root) {
 #ifdef GSMART_FEATURE_SCHEDULE
   if (storage::store->schedule != nullptr) {
     storage::store->schedule->reloadFromJson(root);
-    storage::store->schedule->save();
     return true;
   }
 #endif
@@ -632,7 +631,7 @@ bool ApiCoreV1::apply_scheduler_state(JsonObject root) {
   if (storage::store->schedule != nullptr && !root["enabled"].isNull()) {
     bool enabled = json_bool(root["enabled"], storage::store->schedule->enabled);
     storage::store->schedule->enabled = enabled;
-    storage::store->schedule->save();
+    storage::store->schedule->saveToFile();
     return true;
   }
 #endif
