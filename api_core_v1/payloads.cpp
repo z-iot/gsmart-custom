@@ -233,21 +233,20 @@ void config_connect_json(JsonObject root) {
   root["enable"] = true;
 
   JsonObject ap = root["ap"].to<JsonObject>();
-  ap["enabled"] = true;
-  ap["ssid"] = "promos-AP";
-  ap["password"] = "123456";
+  ap["enabled"] = false;
+  ap["ssid"] = "";
 
   JsonObject client = root["client"].to<JsonObject>();
   client["enabled"] = true;
-  client["ssid"] = "promos";
-  client["password"] = "654321";
+  client["ssid"] = "";
 
   JsonObject time = root["time"].to<JsonObject>();
   time["enabled"] = true;
-  time["server"] = "time.google.com";
+  time["server"] = "pool.ntp.org";
   time["tz_label"] = "Europe/Bratislava";
-  time["tz_format"] = "GMT0BST,M3.5.0/1,M10.5.0";
+  time["tz_format"] = "CET-1CEST,M3.5.0,M10.5.0/3";
 }
+
 
 const char *config_def_string() {
   static const char items[] =

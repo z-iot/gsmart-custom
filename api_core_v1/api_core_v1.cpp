@@ -460,15 +460,32 @@ void ApiCoreV1::build_consumption(JsonObject root) {
 }
 
 void ApiCoreV1::build_network(JsonObject root) {
+  // Use existing payload builder for structure, but we will overwrite with real data
   payloads::config_connect_json(root);
 
-  if (root["ap"].is<JsonObject>())
-    root["ap"].as<JsonObject>().remove("password");
-  if (root["client"].is<JsonObject>())
-    root["client"].as<JsonObject>().remove("password");
+  if (wifi::global_wifi_component != nullptr) {
+    JsonObject client = root["client"].is<JsonObject>() ? root["client"].as<JsonObject>() : root["client"].to<JsonObject>();
+    
+    // Fetch the actual configured SSID from WiFiComponent
+    const auto &sta = wifi::global_wifi_component->get_sta();
+    if (!sta.get_ssid().empty()) {
+      client["ssid"] = sta.get_ssid();
+    } else {
+      client["ssid"] = "";
+    }
+    
+    // Password should never be returned for security
+    client.remove("password");
+    
+    // Add runtime status (connected, signal, ip, etc.)
+    add_wifi_runtime(client);
 
-  JsonObject client = root["client"].is<JsonObject>() ? root["client"].as<JsonObject>() : root["client"].to<JsonObject>();
-  add_wifi_runtime(client);
+    // Also update AP info
+    JsonObject ap = root["ap"].is<JsonObject>() ? root["ap"].as<JsonObject>() : root["ap"].to<JsonObject>();
+    ap["ssid"] = wifi::global_wifi_component->get_ap().get_ssid();
+    ap["enabled"] = wifi::global_wifi_component->is_ap_active();
+    ap.remove("password");
+  }
 }
 
 bool ApiCoreV1::apply_network(JsonObject root) {
@@ -481,21 +498,18 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     std::string ssid = json_string(client["ssid"]);
     std::string password = json_string(client["password"]);
     if (!ssid.empty()) {
+      ESP_LOGI(TAG, "Saving WiFi STA: SSID='%s'", ssid.c_str());
       wifi::global_wifi_component->save_wifi_sta(ssid, password);
       changed = true;
     }
   }
 
-  if (root["ap"].is<JsonObject>()) {
-    JsonObject ap = root["ap"].as<JsonObject>();
-    if (!ap["enabled"].isNull()) {
-      bool active = json_bool(ap["enabled"], esphome::wifi::global_wifi_component->is_ap_active());
-      storage::store->set_wifi_ap_active(active);
-      changed = true;
-    }
-  }
+  // AP enabled setting removed per user request. 
+  // It will follow default ESPHome behavior (on when STA fails).
+  
   return changed;
 }
+
 
 void ApiCoreV1::build_mqtt(JsonObject root) {
 #ifdef USE_MQTT
