@@ -24,10 +24,14 @@ namespace esphome
       {
       case ScheduleMode::MIN:
         return RadiationMode::MIN;
+      case ScheduleMode::STD:
+        return RadiationMode::STD;
       case ScheduleMode::MAX:
         return RadiationMode::MAX;
+      case ScheduleMode::ON:
+        return RadiationMode::ON;
       default:
-        return RadiationMode::STD;
+        return RadiationMode::OFF;
       }
     }
 

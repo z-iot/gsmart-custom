@@ -54,8 +54,10 @@ std::string radiation_mode_to_api(storage::RadiationMode mode) {
       return "std";
     case storage::RadiationMode::MAX:
       return "max";
+    case storage::RadiationMode::ON:
+      return "on";
     default:
-      return "none";
+      return "off";
   }
 }
 
@@ -68,8 +70,10 @@ storage::RadiationMode radiation_mode_from_api(JsonVariant value) {
         return storage::RadiationMode::STD;
       case 3:
         return storage::RadiationMode::MAX;
+      case 4:
+        return storage::RadiationMode::ON;
       default:
-        return storage::RadiationMode::NONE;
+        return storage::RadiationMode::OFF;
     }
   }
 
@@ -80,7 +84,9 @@ storage::RadiationMode radiation_mode_from_api(JsonVariant value) {
     return storage::RadiationMode::STD;
   if (mode == "max" || mode == "maximum")
     return storage::RadiationMode::MAX;
-  return storage::RadiationMode::NONE;
+  if (mode == "on" || mode == "nonstop" || mode == "non" || mode == "inf" || mode == "always")
+    return storage::RadiationMode::ON;
+  return storage::RadiationMode::OFF;
 }
 
 std::string radiation_source_to_api(storage::RadiationSource source) {
@@ -324,7 +330,7 @@ void ApiCoreV1::build_status(JsonObject root) {
   root["model"] = storage::store->get_model();
   root["serial"] = storage::store->get_serial();
   root["mode"] = radiation_mode_to_api(active_mode);
-  root["radiate"] = active_mode != storage::RadiationMode::NONE;
+  root["radiate"] = active_mode != storage::RadiationMode::OFF;
   root["source"] = radiation_source_to_api(storage::store->global->radiation.lastSource);
   root["lastStartSec"] = storage::store->global->radiation.lastStart;
   root["lastStopSec"] = storage::store->global->radiation.lastStop;
@@ -788,7 +794,7 @@ bool ApiCoreV1::handle_api_manual_control(JsonObject root, JsonObject response) 
     return false;
   }
   std::string cmd = normalize_token(root["command"].as<std::string>());
-  storage::RadiationMode mode = (cmd == "on") ? storage::RadiationMode::STD : storage::RadiationMode::NONE;
+  storage::RadiationMode mode = (cmd == "on") ? storage::RadiationMode::STD : storage::RadiationMode::OFF;
   storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
 
   response["ok"] = true;

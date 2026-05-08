@@ -20,7 +20,7 @@ namespace esphome
     struct RadiationSettings
     {
       uint32_t guardDuration = 3 * 60 * 60; // 3hod
-      RadiationMode activeMode = RadiationMode::NONE;
+      RadiationMode activeMode = RadiationMode::OFF;
       RadiationMode nextModeSelector = RadiationMode::STD;
       RadiationSource lastSource = RadiationSource::INT;
       uint32_t lastStart = 0;
@@ -49,7 +49,7 @@ namespace esphome
       uint32_t CurrentEndTime = 0;
       uint16_t CurrentBeamedSec = 0;
       uint16_t CurrentTotalSec = 0;
-      RadiationMode CurrentMode = RadiationMode::NONE;
+      RadiationMode CurrentMode = RadiationMode::OFF;
       bool CurrentIsActive = false; // active/inactive
       bool CurrentIsSchedule = false; // manual/schedule
       bool CurrentIsExternal = false; // internal/external
@@ -58,18 +58,18 @@ namespace esphome
       uint32_t PrevEndTime = 0;
       uint16_t PrevBeamedSec = 0;
       uint16_t PrevTotalSec = 0;
-      RadiationMode PrevMode = RadiationMode::NONE;
+      RadiationMode PrevMode = RadiationMode::OFF;
       
       uint32_t SchBeginTime = 0;
       uint32_t SchEndTime = 0;
       uint16_t SchTotalSec = 0;
-      RadiationMode SchMode = RadiationMode::NONE;
+      RadiationMode SchMode = RadiationMode::OFF;
       bool SchIsAborted = false;
 
       uint32_t NextBeginTime = 0;
       uint32_t NextEndTime = 0;
       uint16_t NextTotalSec = 0;
-      RadiationMode NextMode = RadiationMode::NONE;
+      RadiationMode NextMode = RadiationMode::OFF;
     };
 
     class DataGlobal
@@ -82,7 +82,7 @@ namespace esphome
 
       bool isGuardDurationOverflow()
       {
-        if (this->radiation.activeMode == RadiationMode::NONE)
+        if (this->radiation.activeMode == RadiationMode::OFF)
           return false;
 
         uint32_t now = millis() / 1000;

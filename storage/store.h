@@ -331,19 +331,26 @@ namespace esphome
         int curPos = this->schedule->getCurrentScheduleItemPosition(now);
         if (curPos == -1)
         {
-          if (situation.SchBeginTime != 0 || situation.SchEndTime != 0 || situation.SchTotalSec != 0 || situation.SchMode != RadiationMode::NONE)
+          if (situation.SchBeginTime != 0 || situation.SchEndTime != 0 || situation.SchTotalSec != 0 || situation.SchMode != RadiationMode::OFF)
             change = false;
           situation.SchBeginTime = 0;
           situation.SchEndTime = 0;
           situation.SchTotalSec = 0;
-          situation.SchMode = RadiationMode::NONE;
+          situation.SchMode = RadiationMode::OFF;
         }
         else
         {
           auto schBeginTime = convertFromScheduleTimeToSituationSec(this->schedule->schedule[curPos].day, this->schedule->schedule[curPos].from);
           auto schEndTime = convertFromScheduleTimeToSituationSec(this->schedule->schedule[curPos].day, this->schedule->schedule[curPos].to);
-          auto schTotalSec = getDurationForScheduleMode(convertScheduleModeToRadiationMode(this->schedule->schedule[curPos].mode));
           auto schMode = convertScheduleModeToRadiationMode(this->schedule->schedule[curPos].mode);
+          uint16_t schTotalSec = 0;
+          if (this->schedule->schedule[curPos].radiateMinutes > 0) {
+            schTotalSec = this->schedule->schedule[curPos].radiateMinutes * 60;
+          } else if (schMode == RadiationMode::ON) {
+            schTotalSec = schEndTime - schBeginTime;
+          } else {
+            schTotalSec = getDurationForScheduleMode(schMode);
+          }
           if (situation.SchBeginTime != schBeginTime || situation.SchEndTime != schEndTime || situation.SchTotalSec != schTotalSec || situation.SchMode != schMode)
             change = true;
           situation.SchBeginTime = schBeginTime;
@@ -355,19 +362,26 @@ namespace esphome
         int nextPos = this->schedule->getNextScheduleItemPosition(now);
         if (nextPos == -1)
         {
-          if (situation.NextBeginTime != 0 || situation.NextEndTime != 0 || situation.NextTotalSec != 0 || situation.NextMode != RadiationMode::NONE)
+          if (situation.NextBeginTime != 0 || situation.NextEndTime != 0 || situation.NextTotalSec != 0 || situation.NextMode != RadiationMode::OFF)
             change = false;
           situation.NextBeginTime = 0;
           situation.NextEndTime = 0;
           situation.NextTotalSec = 0;
-          situation.NextMode = RadiationMode::NONE;
+          situation.NextMode = RadiationMode::OFF;
         }
         else
         {
           auto nextBeginTime = convertFromScheduleTimeToSituationSec(this->schedule->schedule[nextPos].day, this->schedule->schedule[nextPos].from);
           auto nextEndTime = convertFromScheduleTimeToSituationSec(this->schedule->schedule[nextPos].day, this->schedule->schedule[nextPos].to);
-          auto nextTotalSec = getDurationForScheduleMode(convertScheduleModeToRadiationMode(this->schedule->schedule[nextPos].mode));
           auto nextMode = convertScheduleModeToRadiationMode(this->schedule->schedule[nextPos].mode);
+          uint16_t nextTotalSec = 0;
+          if (this->schedule->schedule[nextPos].radiateMinutes > 0) {
+            nextTotalSec = this->schedule->schedule[nextPos].radiateMinutes * 60;
+          } else if (nextMode == RadiationMode::ON) {
+            nextTotalSec = nextEndTime - nextBeginTime;
+          } else {
+            nextTotalSec = getDurationForScheduleMode(nextMode);
+          }
           if (situation.NextBeginTime != nextBeginTime || situation.NextEndTime != nextEndTime || situation.NextTotalSec != nextTotalSec || situation.NextMode != nextMode)
             change = true;
           situation.NextBeginTime = nextBeginTime;
@@ -376,18 +390,18 @@ namespace esphome
           situation.NextMode = nextMode;
         }
 #else
-          if (situation.SchBeginTime != 0 || situation.SchEndTime != 0 || situation.SchTotalSec != 0 || situation.SchMode != RadiationMode::NONE)
+          if (situation.SchBeginTime != 0 || situation.SchEndTime != 0 || situation.SchTotalSec != 0 || situation.SchMode != RadiationMode::OFF)
             change = false;
           situation.SchBeginTime = 0;
           situation.SchEndTime = 0;
           situation.SchTotalSec = 0;
-          situation.SchMode = RadiationMode::NONE;
-          if (situation.NextBeginTime != 0 || situation.NextEndTime != 0 || situation.NextTotalSec != 0 || situation.NextMode != RadiationMode::NONE)
+          situation.SchMode = RadiationMode::OFF;
+          if (situation.NextBeginTime != 0 || situation.NextEndTime != 0 || situation.NextTotalSec != 0 || situation.NextMode != RadiationMode::OFF)
             change = false;
           situation.NextBeginTime = 0;
           situation.NextEndTime = 0;
           situation.NextTotalSec = 0;
-          situation.NextMode = RadiationMode::NONE;          
+          situation.NextMode = RadiationMode::OFF;          
 #endif
 
         if (change)
@@ -402,7 +416,7 @@ namespace esphome
           return;
 
         uint32_t nowMs = millis() / 1000;
-        if (mode != RadiationMode::NONE)
+        if (mode != RadiationMode::OFF)
         {
           // radiation start
           this->global->radiation.lastStart = nowMs;
@@ -479,19 +493,19 @@ namespace esphome
 
         // check max guardDuration
         if (this->global->isGuardDurationOverflow())
-          return RadiationMode::NONE;
+          return RadiationMode::OFF;
 
-        if (situation.CurrentIsActive && this->getTimerDurationSec(now) == 0)
+        if (situation.CurrentIsActive && situation.CurrentMode != RadiationMode::ON && this->getTimerDurationSec(now) == 0)
         {
           situation.SchIsAborted = true;
-          return RadiationMode::NONE;
+          return RadiationMode::OFF;
         }
 
 #ifdef GSMART_FEATURE_SCHEDULE
         // check schedule
         if (this->schedule->enabled && !situation.SchIsAborted &&
             ((this->region->isRegionActive() && this->region->isMaster()) || (!this->region->isRegionActive())) &&
-            (this->global->radiation.activeMode == RadiationMode::NONE || (this->global->radiation.activeMode != RadiationMode::NONE && this->global->radiation.lastSource == RadiationSource::SCH)))
+            (this->global->radiation.activeMode == RadiationMode::OFF || (this->global->radiation.activeMode != RadiationMode::OFF && this->global->radiation.lastSource == RadiationSource::SCH)))
           return schedule->getCurrentRadiationMode(now);
 #endif
         return this->global->radiation.activeMode;

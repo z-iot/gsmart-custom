@@ -41,14 +41,16 @@ namespace esphome
     {
       switch (item)
       {
-      case storage::RadiationMode::NONE:
-        return "NONE";
+      case storage::RadiationMode::OFF:
+        return "OFF";
       case storage::RadiationMode::MIN:
         return "MIN";
       case storage::RadiationMode::STD:
         return "STD";
       case storage::RadiationMode::MAX:
         return "MAX";
+      case storage::RadiationMode::ON:
+        return "ON";
       default:
         return "--unknown--";
       }

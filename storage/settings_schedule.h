@@ -60,10 +60,13 @@ namespace esphome
             arrItem["m"] = "m";
           else if (item.mode == ScheduleMode::MAX)
             arrItem["m"] = "M";
+          else if (item.mode == ScheduleMode::ON)
+            arrItem["m"] = "o";
           else
             arrItem["m"] = "s";
           arrItem["f"] = convertTimeToString(item.from);
           arrItem["t"] = convertTimeToString(item.to);
+          arrItem["r"] = item.radiateMinutes;
         }
       }
 
@@ -86,10 +89,13 @@ namespace esphome
               itemData.mode = ScheduleMode::MIN;
             else if (item["m"] == "M")
               itemData.mode = ScheduleMode::MAX;
+            else if (item["m"] == "o")
+              itemData.mode = ScheduleMode::ON;
             else
               itemData.mode = ScheduleMode::STD;
             itemData.from = convertStringToTime(item["f"]);
             itemData.to = convertStringToTime(item["t"]);
+            itemData.radiateMinutes = item["r"] | 0;
             this->schedule.push_back(itemData);
           }
           ESP_LOGI("storage", "Loaded %d schedule frames", this->schedule.size());
@@ -249,7 +255,7 @@ namespace esphome
         int curPos = getCurrentScheduleItemPosition(now);
         // ESP_LOGI("radiation", "getCurrentRadiationMode curPos:%d, schedule.size:%d, time=%d/%d:%d", curPos, this->schedule.size(), getTime(now)->tm_wday, getTime(now)->tm_hour, getTime(now)->tm_min);
         if (curPos == -1)
-          return RadiationMode::NONE;
+          return RadiationMode::OFF;
         return convertScheduleModeToRadiationMode(schedule[curPos].mode);
       };
     };

@@ -151,7 +151,7 @@ namespace esphome
       PacketStatus packet;
       get_mac_address_raw(packet.mac);
       packet.event = KindStatusEvent::INTERVAL;
-      packet.radiation = storage::RadiationMode::NONE;
+      packet.radiation = storage::RadiationMode::OFF;
       packet.radiationSource = KindRadiationSource::SOURCE_UNKNOWN;
       packet.lamp = KindLampMode::OFF;
       packet.motion = false;

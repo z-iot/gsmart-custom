@@ -85,7 +85,9 @@ namespace esphome
         return storage::RadiationMode::STD;
       if (modeStr == "Max")
         return storage::RadiationMode::MAX;
-      return storage::RadiationMode::NONE;
+      if (modeStr == "On")
+        return storage::RadiationMode::ON;
+      return storage::RadiationMode::OFF;
     }
 
     std::string convertRadiationModeToStr(storage::RadiationMode mode)
@@ -98,8 +100,10 @@ namespace esphome
         return "Std";
       case storage::RadiationMode::MAX:
         return "Max";
+      case storage::RadiationMode::ON:
+        return "On";
       default:
-        return "None";
+        return "Off";
       }
     }
 

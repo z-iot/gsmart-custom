@@ -9,10 +9,11 @@ namespace esphome
 
     enum RadiationMode
     {
-      NONE = 0,
+      OFF = 0,
       MIN = 1,
       STD = 2,
       MAX = 3,
+      ON = 4,
     };
 
     enum class ScheduleMode
@@ -20,6 +21,7 @@ namespace esphome
       MIN = 'm',
       STD = 's',
       MAX = 'M',
+      ON = 'o',
     };
 
     enum class FactoryMode
@@ -28,6 +30,23 @@ namespace esphome
       PHOENIX = 2,
       CLOUD = 3,
     };
+
+    inline uint16_t getDurationForScheduleMode(RadiationMode mode)
+    {
+      switch (mode)
+      {
+      case RadiationMode::MIN:
+        return 30 * 60;
+      case RadiationMode::STD:
+        return 60 * 60;
+      case RadiationMode::MAX:
+        return 90 * 60;
+      case RadiationMode::ON:
+        return 0xFFFF; // Approximately 18 hours or handle as infinite
+      default:
+        return 0;
+      }
+    }
 
     enum LampMode
     {
@@ -104,6 +123,7 @@ namespace esphome
       ScheduleMode mode;
       ScheduleTime from;
       ScheduleTime to;
+      uint16_t radiateMinutes;
     };
 
     uint32_t convertFromEspTimeToSituationSec(time_t nowTime);
