@@ -15,7 +15,8 @@ void ApiAdapterMqtt::setup() {
   }
 
   std::string serial = storage::store != nullptr ? storage::store->get_serial() : "unknown";
-  this->base_topic_ = "gsmart/mobile/" + serial + "/" + this->core_->get_version_path();
+  std::string model = storage::store != nullptr ? storage::store->get_model() : "unknown";
+  this->base_topic_ = model + "/" + serial + "/" + this->core_->get_version_path();
 
   this->subscribe_topics_();
 }
@@ -85,12 +86,15 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
 
 void ApiAdapterMqtt::publish_response_(const std::string &suffix, JsonVariant rid, std::function<void(JsonObject)> builder) {
   std::string full_topic = this->base_topic_ + "/" + suffix;
-  mqtt::global_mqtt_client->publish_json(full_topic, [rid, builder](JsonObject root) {
-    if (!rid.isNull()) {
-      root["rid"] = rid;
-    }
-    builder(root);
-  });
+  DynamicJsonDocument doc(4096);
+  JsonObject root = doc.to<JsonObject>();
+  if (!rid.isNull()) {
+    root["rid"] = rid;
+  }
+  builder(root);
+  std::string payload;
+  serializeJson(doc, payload);
+  mqtt::global_mqtt_client->publish(full_topic, payload);
 }
 
 }  // namespace api_adapter_mqtt

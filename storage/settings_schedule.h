@@ -60,8 +60,8 @@ namespace esphome
             arrItem["m"] = "m";
           else if (item.mode == ScheduleMode::MAX)
             arrItem["m"] = "M";
-          // else
-          //   arrItem["m"] = "s";
+          else
+            arrItem["m"] = "s";
           arrItem["f"] = convertTimeToString(item.from);
           arrItem["t"] = convertTimeToString(item.to);
         }
