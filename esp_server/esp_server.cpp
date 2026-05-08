@@ -45,6 +45,7 @@ namespace gsmart_esp_server {
 
 static const char *const TAG = "esp_server";
 
+#ifdef USE_LOGGER
 static std::string strip_ansi_colors(const std::string &str) {
   std::string result;
   result.reserve(str.size());
@@ -63,6 +64,7 @@ static std::string strip_ansi_colors(const std::string &str) {
   }
   return result;
 }
+#endif
 
 EspServer *global_esp_server = nullptr;
 
