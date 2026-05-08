@@ -3,21 +3,22 @@
 using namespace esphome::web_server_idf;
 
 #include "WWWData.h"
-#include "esphome/components/deck_server/payloads.h"
-#include "esphome/components/deck_server/web_helpers.h"
+#include "esphome/components/api_core_v1/payloads.h"
+#include "esphome/components/web_server_base/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 
 namespace esphome {
 namespace control_server {
 
-namespace gs = esphome::deck_server;
+namespace wsb = esphome::web_server_base;
+namespace core = esphome::api_core_v1;
 
 namespace {
 
 // GET handler that builds a JSON response via the deck_server payload helper.
 void register_json_get(const std::shared_ptr<AsyncWebServer> &server, const char *uri,
                        std::function<void(JsonObject)> builder) {
-  gs::on(server, uri, HTTP_GET, [builder](AsyncWebServerRequest *request) {
+  wsb::on(server, uri, HTTP_GET, [builder](AsyncWebServerRequest *request) {
     std::string data = esphome::json::build_json([&builder](JsonObject root) { builder(root); });
     request->send(200, "application/json", data.c_str());
   });
@@ -26,7 +27,7 @@ void register_json_get(const std::shared_ptr<AsyncWebServer> &server, const char
 // POST stub: parses no body, just returns `{"xxx":"XXXX"}` like the original
 // mobile_api placeholders. Replace once a real writer exists.
 void register_post_stub(const std::shared_ptr<AsyncWebServer> &server, const char *uri) {
-  gs::on(server, uri, HTTP_POST, [](AsyncWebServerRequest *request) {
+  wsb::on(server, uri, HTTP_POST, [](AsyncWebServerRequest *request) {
     std::string data = esphome::json::build_json([](JsonObject root) { root["xxx"] = "XXXX"; });
     request->send(200, "application/json", data.c_str());
   });
@@ -36,7 +37,7 @@ void register_post_stub(const std::shared_ptr<AsyncWebServer> &server, const cha
 // responds with the same `{"xxx":"XXXX"}` ack the legacy clients expect.
 void register_json_post(const std::shared_ptr<AsyncWebServer> &server, const char *uri,
                         std::function<void(JsonObject)> writer) {
-  gs::on_post_json(server, uri, [writer](AsyncWebServerRequest *request, JsonObject root) {
+  wsb::on_post_json(server, uri, [writer](AsyncWebServerRequest *request, JsonObject root) {
     writer(root);
     std::string data = esphome::json::build_json([](JsonObject ack) { ack["xxx"] = "XXXX"; });
     request->send(200, "application/json", data.c_str());
@@ -77,49 +78,49 @@ void ControlServer::setup() {
               request->send(404);
             }
           });
-          gs::on(server, "/", HTTP_GET, requestHandler);
-          gs::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));
+          wsb::on(server, "/", HTTP_GET, requestHandler);
+          wsb::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));
         } else {
-          gs::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));
+          wsb::on(server, uri.c_str(), HTTP_GET, std::move(requestHandler));
         }
       });
 
   // Legacy gsmart-deck REST endpoints. The actual JSON building / storage
-  // wiring lives in deck_server::payloads so a future mobile_api can reuse
+  // wiring lives in core::payloads so a future mobile_api can reuse
   // the same helpers under a clean /api/mobile/v1/* contract.
-  register_json_get(server, "/inf/system", &gs::payloads::system_info_json);
-  register_json_get(server, "/inf/neighborhood", &gs::payloads::neighborhood_json);
-  register_json_get(server, "/rest/features", &gs::payloads::features_json);
+  register_json_get(server, "/inf/system", &core::payloads::system_info_json);
+  register_json_get(server, "/inf/neighborhood", &core::payloads::neighborhood_json);
+  register_json_get(server, "/rest/features", &core::payloads::features_json);
 
-  register_json_get(server, "/cfg/scheduller", &gs::payloads::scheduller_json);
-  register_json_post(server, "/cfg/scheduller", &gs::payloads::scheduller_apply);
+  register_json_get(server, "/cfg/scheduller", &core::payloads::scheduller_json);
+  register_json_post(server, "/cfg/scheduller", &core::payloads::scheduller_apply);
 
-  register_json_get(server, "/cfg/config", &gs::payloads::config_data_json);
+  register_json_get(server, "/cfg/config", &core::payloads::config_data_json);
   register_post_stub(server, "/cfg/config");
 
-  register_json_get(server, "/cfg/device", &gs::payloads::config_device_json);
+  register_json_get(server, "/cfg/device", &core::payloads::config_device_json);
   register_post_stub(server, "/cfg/device");
 
-  register_json_get(server, "/cfg/mode", &gs::payloads::config_mode_json);
+  register_json_get(server, "/cfg/mode", &core::payloads::config_mode_json);
   register_post_stub(server, "/cfg/mode");
 
-  register_json_get(server, "/cfg/treatment", &gs::payloads::config_treatment_json);
+  register_json_get(server, "/cfg/treatment", &core::payloads::config_treatment_json);
   register_post_stub(server, "/cfg/treatment");
 
-  register_json_get(server, "/cfg/security", &gs::payloads::config_security_json);
+  register_json_get(server, "/cfg/security", &core::payloads::config_security_json);
   register_post_stub(server, "/cfg/security");
 
-  register_json_get(server, "/cfg/consumable", &gs::payloads::config_consumable_json);
+  register_json_get(server, "/cfg/consumable", &core::payloads::config_consumable_json);
   register_post_stub(server, "/cfg/consumable");
 
-  register_json_get(server, "/cfg/connect", &gs::payloads::config_connect_json);
+  register_json_get(server, "/cfg/connect", &core::payloads::config_connect_json);
   register_post_stub(server, "/cfg/connect");
 
-  register_json_post(server, "/cfg/neighbor", &gs::payloads::neighbor_apply);
+  register_json_post(server, "/cfg/neighbor", &core::payloads::neighbor_apply);
 
   // /cfg/def returns a hand-written long string, no builder needed.
-  gs::on(server, "/cfg/def", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", gs::payloads::config_def_string());
+  wsb::on(server, "/cfg/def", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", core::payloads::config_def_string());
   });
   register_post_stub(server, "/cfg/def");
 

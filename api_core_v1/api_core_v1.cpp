@@ -2,12 +2,13 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-#include "esphome/components/deck_server/payloads.h"
-#include "esphome/components/deck_server/web_helpers.h"
+#include "payloads.h"
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/util.h"
 #include "esphome/components/wifi/wifi_component.h"
+#ifdef ESP32
 #include <esp_wifi.h>
+#endif
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -459,7 +460,7 @@ void ApiCoreV1::build_consumption(JsonObject root) {
 }
 
 void ApiCoreV1::build_network(JsonObject root) {
-  deck_server::payloads::config_connect_json(root);
+  payloads::config_connect_json(root);
 
   if (root["ap"].is<JsonObject>())
     root["ap"].as<JsonObject>().remove("password");

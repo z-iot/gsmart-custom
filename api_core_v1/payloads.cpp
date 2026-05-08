@@ -5,7 +5,7 @@
 #include "esphome/core/helpers.h"
 
 namespace esphome {
-namespace deck_server {
+namespace api_core_v1 {
 namespace payloads {
 
 void system_info_json(JsonObject root) {
@@ -41,10 +41,12 @@ void system_info_json(JsonObject root) {
 
   JsonObject process = root["process"].to<JsonObject>();
   process["schedule_enabled"] = esphome::storage::store->schedule->enabled;
+#ifdef GSMART_FEATURE_REGION
   process["isRegionActive"] = esphome::storage::store->region->isRegionActive();
   process["isMaster"] = esphome::storage::store->region->isMaster();
   process["selfIndex"] = esphome::storage::store->region->selfIndex;
   process["masterIndex"] = esphome::storage::store->region->layout.masterIndex;
+#endif
 
   uint8_t selfMac[6];
   esphome::get_mac_address_raw(selfMac);
@@ -254,5 +256,5 @@ const char *config_def_string() {
 }
 
 }  // namespace payloads
-}  // namespace deck_server
+}  // namespace api_core_v1
 }  // namespace esphome

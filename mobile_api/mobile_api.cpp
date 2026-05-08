@@ -2,8 +2,8 @@
 using namespace esphome::web_server_idf;
 #include "esphome/components/esp_server/esp_server.h"
 
-#include "esphome/components/deck_server/payloads.h"
-#include "esphome/components/deck_server/web_helpers.h"
+#include "esphome/components/api_core_v1/payloads.h"
+#include "esphome/components/web_server_base/web_helpers.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/store.h"
 #include "esphome/components/storage/util.h"
@@ -29,6 +29,8 @@ namespace esphome {
 namespace mobile_api {
 
 namespace gs = esphome::deck_server;
+namespace wsb = esphome::web_server_base;
+namespace core = esphome::api_core_v1;
 
 namespace {
 
@@ -165,18 +167,18 @@ void send_ok(AsyncWebServerRequest *request, std::function<void(JsonObject)> ext
 
 void register_json_get(const std::shared_ptr<AsyncWebServer> &server, const std::string &uri,
                        std::function<void(JsonObject)> builder) {
-  gs::on(server, uri.c_str(), HTTP_GET, [builder](AsyncWebServerRequest *request) { send_json(request, builder); });
+  wsb::on(server, uri.c_str(), HTTP_GET, [builder](AsyncWebServerRequest *request) { send_json(request, builder); });
 }
 
 void register_json_post(const std::shared_ptr<AsyncWebServer> &server, const std::string &uri,
                         std::function<void(AsyncWebServerRequest *, JsonObject)> handler) {
-  gs::on_post_json(server, uri.c_str(),
+  wsb::on_post_json(server, uri.c_str(),
                    [handler](AsyncWebServerRequest *request, JsonObject root) { handler(request, root); });
 }
 
 void register_post_not_implemented(const std::shared_ptr<AsyncWebServer> &server, const std::string &uri,
                                    const char *feature) {
-  gs::on(server, uri.c_str(), HTTP_POST, [feature](AsyncWebServerRequest *request) {
+  wsb::on(server, uri.c_str(), HTTP_POST, [feature](AsyncWebServerRequest *request) {
     send_error(request, 501, "not_implemented", feature);
   });
 }
@@ -480,7 +482,7 @@ void build_diagnostics(JsonObject root) {
 }
 
 void build_network(JsonObject root) {
-  gs::payloads::config_connect_json(root);
+  core::payloads::config_connect_json(root);
 
   if (root["ap"].is<JsonObject>())
     root["ap"].as<JsonObject>().remove("password");

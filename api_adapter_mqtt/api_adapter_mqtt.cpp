@@ -86,7 +86,7 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
 
 void ApiAdapterMqtt::publish_response_(const std::string &suffix, JsonVariant rid, std::function<void(JsonObject)> builder) {
   std::string full_topic = this->base_topic_ + "/" + suffix;
-  DynamicJsonDocument doc(4096);
+  JsonDocument doc;
   JsonObject root = doc.to<JsonObject>();
   if (!rid.isNull()) {
     root["rid"] = rid;

@@ -1,8 +1,6 @@
 #include "SecurityService.h"
 #include "esphome/components/storage/store.h"
 
-using namespace esphome::web_server_idf;
-
 SecurityService::SecurityService(std::shared_ptr<AsyncWebServer> server) : _jwtHandler(FACTORY_JWT_SECRET)
 {
 }
@@ -11,6 +9,7 @@ void SecurityService::begin()
 {
   configureJWTHandler();
 }
+
 
 Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *request)
 {
@@ -26,7 +25,7 @@ Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *reque
     }
   }
 #else
-  AsyncWebHeader *authorizationHeader = request->getHeader(AUTHORIZATION_HEADER);
+  const AsyncWebHeader *authorizationHeader = request->getHeader(AUTHORIZATION_HEADER);
   if (authorizationHeader)
   {
     String value = authorizationHeader->value();
@@ -39,7 +38,7 @@ Authentication SecurityService::authenticateRequest(AsyncWebServerRequest *reque
 #endif
   if (request->hasParam(ACCESS_TOKEN_PARAMATER))
   {
-    AsyncWebParameter *tokenParamater = request->getParam(ACCESS_TOKEN_PARAMATER);
+    const AsyncWebParameter *tokenParamater = request->getParam(ACCESS_TOKEN_PARAMATER);
     String value(tokenParamater->value().c_str());
     return authenticateJWT(value);
   }

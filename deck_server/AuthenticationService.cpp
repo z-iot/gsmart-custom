@@ -1,10 +1,10 @@
 #include "AuthenticationService.h"
-#include "web_helpers.h"
+#include "esphome/components/web_server_base/web_helpers.h"
 
 // AsyncWebHandler for SIGN_IN_PATH POST with JSON body.
 // Body is consumed via handleBody (same pattern as Config* handlers) so we
 // don't depend on framework-internal storage of the POST body.
-class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
+class SignInHandler : public AsyncWebHandler {
  private:
   AuthenticationService *auth_service_;
   std::string body_;
@@ -12,18 +12,22 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
  public:
   SignInHandler(AuthenticationService *auth) : auth_service_(auth) {}
 
-  bool canHandle(esphome::web_server_idf::AsyncWebServerRequest *request) const override {
+  bool canHandle(AsyncWebServerRequest *request) const override {
     if (request->method() != HTTP_POST) return false;
-    char url_buf[esphome::web_server_idf::AsyncWebServerRequest::URL_BUF_SIZE];
-    auto url = request->url_to(url_buf);
+#if USE_ESP32
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    std::string url = std::string(request->url_to(url_buf));
+#else
+    std::string url = request->url().c_str();
+#endif
     return (url == SIGN_IN_PATH || url == LEGACY_SIGN_IN_PATH);
   }
 
-  void handleRequest(esphome::web_server_idf::AsyncWebServerRequest *request) override {
+  void handleRequest(AsyncWebServerRequest *request) override {
     // Body handled by handleBody.
   }
 
-  void handleBody(esphome::web_server_idf::AsyncWebServerRequest *request, uint8_t *data, size_t len,
+  void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len,
                   size_t index, size_t total) override {
     if (index == 0) body_.clear();
     body_.append((char *) data, len);
@@ -44,9 +48,9 @@ class SignInHandler : public esphome::web_server_idf::AsyncWebHandler {
 
 AuthenticationService::AuthenticationService(std::shared_ptr<AsyncWebServer> server, SecurityManager *securityManager) : _securityManager(securityManager)
 {
-  esphome::deck_server::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+  esphome::web_server_base::on(server, VERIFY_AUTHORIZATION_PATH, HTTP_GET,
                              std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
-  esphome::deck_server::on(server, LEGACY_VERIFY_AUTHORIZATION_PATH, HTTP_GET,
+  esphome::web_server_base::on(server, LEGACY_VERIFY_AUTHORIZATION_PATH, HTTP_GET,
                              std::bind(&AuthenticationService::verifyAuthorization, this, std::placeholders::_1));
 
   // Register sign-in handler
