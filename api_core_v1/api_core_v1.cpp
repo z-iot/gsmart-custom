@@ -10,6 +10,8 @@
 #include <esp_wifi.h>
 #endif
 
+#include "gsmart_wifi_manager/gsmart_wifi_manager.h"
+
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
 #endif
@@ -460,53 +462,100 @@ void ApiCoreV1::build_consumption(JsonObject root) {
 }
 
 void ApiCoreV1::build_network(JsonObject root) {
-  // Use existing payload builder for structure, but we will overwrite with real data
-  payloads::config_connect_json(root);
+  auto *mgr = gsmart_wifi_manager::global_gsmart_wifi_manager;
+  if (mgr == nullptr)
+    return;
 
-  if (wifi::global_wifi_component != nullptr) {
-    JsonObject client = root["client"].is<JsonObject>() ? root["client"].as<JsonObject>() : root["client"].to<JsonObject>();
-    
-    // Fetch the actual configured SSID from WiFiComponent
-    const auto &sta = wifi::global_wifi_component->get_sta();
-    if (!sta.get_ssid().empty()) {
-      client["ssid"] = sta.get_ssid();
-    } else {
-      client["ssid"] = "";
-    }
-    
-    // Password should never be returned for security
-    client.remove("password");
-    
-    // Add runtime status (connected, signal, ip, etc.)
-    add_wifi_runtime(client);
+  root["connected"] = mgr->is_connected();
+  root["active_ssid"] = mgr->get_active_ssid();
+  root["ip"] = mgr->get_ip_address();
+  root["active_profile"] = mgr->get_active_ap_profile();
 
-    // Also update AP info
-    JsonObject ap = root["ap"].is<JsonObject>() ? root["ap"].as<JsonObject>() : root["ap"].to<JsonObject>();
-    ap["ssid"] = wifi::global_wifi_component->get_ap().get_ssid();
-    ap["enabled"] = wifi::global_wifi_component->is_ap_active();
-    ap.remove("password");
-  }
+  JsonObject sta = root["sta"].to<JsonObject>();
+  const auto &settings = mgr->get_settings();
+
+  auto add_net = [&](JsonObject obj, const char *ssid, const char *pswd) {
+    obj["ssid"] = ssid;
+    obj["password_set"] = (pswd[0] != 0);
+  };
+
+  add_net(sta["service"].to<JsonObject>(), settings.service_ssid, settings.service_password);
+  add_net(sta["customer_primary"].to<JsonObject>(), settings.customer_primary_ssid, settings.customer_primary_password);
+  add_net(sta["customer_secondary"].to<JsonObject>(), settings.customer_secondary_ssid, settings.customer_secondary_password);
+
+  JsonObject soft_ap = root["soft_ap"].to<JsonObject>();
+
+  auto add_ap = [&](JsonObject obj, const char *ssid, const char *pswd, bool enabled) {
+    obj["ssid"] = ssid;
+    obj["password_set"] = (pswd[0] != 0);
+    obj["enabled"] = enabled;
+  };
+
+  add_ap(soft_ap["service_ap"].to<JsonObject>(), settings.service_ap_ssid, settings.service_ap_password,
+         settings.service_ap_enabled);
+  auto region_ap = soft_ap["region_ap"].to<JsonObject>();
+  add_ap(region_ap, settings.region_ap_ssid, settings.region_ap_password, settings.region_ap_enabled);
+  region_ap["sta_policy"] = (settings.region_ap_sta_policy == 1 ? "ap_only" : "apsta");
 }
 
 bool ApiCoreV1::apply_network(JsonObject root) {
-  if (wifi::global_wifi_component == nullptr)
+  auto *mgr = gsmart_wifi_manager::global_gsmart_wifi_manager;
+  if (mgr == nullptr)
     return false;
 
   bool changed = false;
+
+  // Legacy mapping
+  if (!root["wifi_ssid"].isNull()) {
+    mgr->set_sta_customer_primary(root["wifi_ssid"].as<std::string>(), json_string(root["wifi_password"]));
+    changed = true;
+  }
+
   if (root["client"].is<JsonObject>()) {
     JsonObject client = root["client"].as<JsonObject>();
     std::string ssid = json_string(client["ssid"]);
     std::string password = json_string(client["password"]);
     if (!ssid.empty()) {
-      ESP_LOGI(TAG, "Saving WiFi STA: SSID='%s'", ssid.c_str());
-      wifi::global_wifi_component->save_wifi_sta(ssid, password);
+      mgr->set_sta_customer_primary(ssid, password);
       changed = true;
     }
   }
 
-  // AP enabled setting removed per user request. 
-  // It will follow default ESPHome behavior (on when STA fails).
-  
+  // New API
+  if (root["sta"].is<JsonObject>()) {
+    JsonObject sta = root["sta"].as<JsonObject>();
+    if (sta["service"].is<JsonObject>()) {
+      JsonObject s = sta["service"].as<JsonObject>();
+      mgr->set_sta_service(json_string(s["ssid"]), json_string(s["password"]));
+      changed = true;
+    }
+    if (sta["customer_primary"].is<JsonObject>()) {
+      JsonObject s = sta["customer_primary"].as<JsonObject>();
+      mgr->set_sta_customer_primary(json_string(s["ssid"]), json_string(s["password"]));
+      changed = true;
+    }
+    if (sta["customer_secondary"].is<JsonObject>()) {
+      JsonObject s = sta["customer_secondary"].as<JsonObject>();
+      mgr->set_sta_customer_secondary(json_string(s["ssid"]), json_string(s["password"]));
+      changed = true;
+    }
+  }
+
+  if (root["soft_ap"].is<JsonObject>()) {
+    JsonObject soft_ap = root["soft_ap"].as<JsonObject>();
+    if (soft_ap["service_ap"].is<JsonObject>()) {
+      JsonObject s = soft_ap["service_ap"].as<JsonObject>();
+      mgr->set_service_ap(json_string(s["ssid"]), json_string(s["password"]), json_bool(s["enabled"], true));
+      changed = true;
+    }
+    if (soft_ap["region_ap"].is<JsonObject>()) {
+      JsonObject s = soft_ap["region_ap"].as<JsonObject>();
+      uint8_t policy = (json_string(s["sta_policy"]) == "ap_only" ? 1 : 0);
+      mgr->set_region_ap(json_string(s["ssid"]), json_string(s["password"]), json_bool(s["enabled"], false), policy);
+      changed = true;
+    }
+  }
+
   return changed;
 }
 
