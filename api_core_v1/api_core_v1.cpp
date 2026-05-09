@@ -10,7 +10,7 @@
 #include <esp_wifi.h>
 #endif
 
-#include "gsmart_wifi_manager/gsmart_wifi_manager.h"
+#include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -498,6 +498,30 @@ void ApiCoreV1::build_network(JsonObject root) {
   region_ap["sta_policy"] = (settings.region_ap_sta_policy == 1 ? "ap_only" : "apsta");
 }
 
+void ApiCoreV1::build_network_scan(JsonObject root) {
+  auto *mgr = gsmart_wifi_manager::global_gsmart_wifi_manager;
+  if (mgr == nullptr) {
+    root["scan_started"] = false;
+    root["cached"] = false;
+    root["networks"].to<JsonArray>();
+    return;
+  }
+
+  mgr->start_scan(true);
+  root["scan_started"] = true;
+  root["cached"] = mgr->has_scan_results();
+  JsonArray networks = root["networks"].to<JsonArray>();
+  for (const auto &item : mgr->get_scan_results()) {
+    JsonObject obj = networks.add<JsonObject>();
+    obj["ssid"] = item.ssid;
+    obj["rssi"] = item.rssi;
+    obj["channel"] = item.channel;
+    obj["secure"] = item.secure;
+    obj["known"] = item.known;
+    obj["priority"] = item.priority;
+  }
+}
+
 bool ApiCoreV1::apply_network(JsonObject root) {
   auto *mgr = gsmart_wifi_manager::global_gsmart_wifi_manager;
   if (mgr == nullptr)
@@ -824,7 +848,8 @@ bool ApiCoreV1::handle_api_config(JsonObject root, JsonObject response) {
   if (!root["wifi_ssid"].isNull()) {
     std::string ssid = root["wifi_ssid"].as<std::string>();
     std::string password = json_string(root["wifi_password"]);
-    wifi::global_wifi_component->save_wifi_sta(ssid, password);
+    if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+      gsmart_wifi_manager::global_gsmart_wifi_manager->set_sta_customer_primary(ssid, password);
     changed = true;
   }
   if (!root["region"].isNull()) {
@@ -868,6 +893,7 @@ bool ApiCoreV1::handle_api_manual_control(JsonObject root, JsonObject response) 
 
 // --- Settings: Consumables ---
 void ApiCoreV1::build_settings_consumables(JsonObject root) {
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   if (storage::store == nullptr || storage::store->usage == nullptr) return;
   for (int i = 0; i < DEVICE_MAX_LAMP; i++) {
     std::string key = (i == 0) ? "lampA" : ((i == 1) ? "lampB" : (std::string("lamp") + std::to_string(i)));
@@ -878,9 +904,13 @@ void ApiCoreV1::build_settings_consumables(JsonObject root) {
     lampJson["burnedHours"] = pref.onSec / 3600;
     lampJson["firstUseDate"] = pref.lastExchangeDate;
   }
+#else
+  root["enabled"] = false;
+#endif
 }
 
 bool ApiCoreV1::apply_settings_consumables(JsonObject root) {
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   if (storage::store == nullptr || storage::store->usage == nullptr) return false;
   bool changed = false;
   for (int i = 0; i < DEVICE_MAX_LAMP; i++) {
@@ -899,6 +929,9 @@ bool ApiCoreV1::apply_settings_consumables(JsonObject root) {
     storage::store->usage->save();
   }
   return changed;
+#else
+  return false;
+#endif
 }
 
 // --- Settings: Modes ---

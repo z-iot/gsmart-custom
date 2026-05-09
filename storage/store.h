@@ -29,7 +29,7 @@
 #ifdef USE_ESP32
 #include <esp_wifi.h>
 #endif
-#include "gsmart_wifi_manager/gsmart_wifi_manager.h"
+#include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
 
 
 
@@ -156,7 +156,10 @@ namespace esphome
             res += "W";
         }
 
-        if (esphome::wifi::global_wifi_component->is_ap_active())
+        bool ap_active = esphome::wifi::global_wifi_component->is_ap_active();
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+          ap_active = gsmart_wifi_manager::global_gsmart_wifi_manager->is_ap_active();
+        if (ap_active)
           // AP
           res += "A";
 

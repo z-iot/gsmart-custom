@@ -67,6 +67,8 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
     } else if (sub_topic == "network/set") {
       bool ok = this->core_->apply_network(root);
       this->publish_response_("network/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+    } else if (sub_topic == "network/scan") {
+      this->publish_response_("network/scan/state", rid, [this](JsonObject res) { this->core_->build_network_scan(res); });
     } else if (sub_topic == "network/mqtt/get") {
       this->publish_response_("network/mqtt/state", rid, [this](JsonObject res) { this->core_->build_mqtt(res); });
     } else if (sub_topic == "region/get") {

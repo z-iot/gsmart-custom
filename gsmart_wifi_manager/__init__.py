@@ -10,11 +10,14 @@ GsmartWifiManager = gsmart_wifi_manager_ns.class_("GsmartWifiManager", cg.Compon
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(GsmartWifiManager),
-    cv.Optional(CONF_NETWORKS): cv.ensure_list(wifi.WIFI_NETWORK_SCHEMA),
+    cv.Optional(CONF_NETWORKS): cv.ensure_list(wifi.WIFI_NETWORK_STA),
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
-    var = cg.new_component_variable(config[CONF_ID])
+    wifi.request_wifi_scan_results()
+    wifi.request_wifi_scan_results_listener()
+
+    var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
     if CONF_NETWORKS in config:

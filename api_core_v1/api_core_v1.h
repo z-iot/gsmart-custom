@@ -31,6 +31,7 @@ class ApiCoreV1 : public Component {
 
   // Network
   void build_network(JsonObject root);
+  void build_network_scan(JsonObject root);
   bool apply_network(JsonObject root);
   void build_mqtt(JsonObject root);
 

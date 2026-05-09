@@ -60,6 +60,9 @@ void ApiAdapterRest::setup() {
     bool applied = this->core_->apply_network(root);
     send_ok(request, [applied](JsonObject res) { res["applied"] = applied; });
   });
+  web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST, [this](AsyncWebServerRequest *request) {
+    send_json(request, [this](JsonObject res) { this->core_->build_network_scan(res); });
+  });
 
   // POST Control Mode
   web_server_base::on_post_json(server, (base_path + "/control/mode").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {

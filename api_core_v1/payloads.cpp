@@ -214,6 +214,7 @@ void config_security_json(JsonObject root) {
 }
 
 void config_consumable_json(JsonObject root) {
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   if (esphome::storage::store == nullptr || esphome::storage::store->usage == nullptr) {
     return;
   }
@@ -227,6 +228,9 @@ void config_consumable_json(JsonObject root) {
     lampJson["switching-current"] = pref.startCount;
     lampJson["reset-last"] = pref.lastExchangeDate;
   }
+#else
+  root["enabled"] = false;
+#endif
 }
 
 void config_connect_json(JsonObject root) {
