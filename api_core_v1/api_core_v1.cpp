@@ -472,16 +472,17 @@ void ApiCoreV1::build_network(JsonObject root) {
   root["active_profile"] = mgr->get_active_ap_profile();
 
   JsonObject sta = root["sta"].to<JsonObject>();
-  const auto &settings = mgr->get_settings();
+  const auto &client = mgr->get_client_settings();
+  const auto &ap = mgr->get_ap_settings();
 
   auto add_net = [&](JsonObject obj, const char *ssid, const char *pswd) {
     obj["ssid"] = ssid;
     obj["password_set"] = (pswd[0] != 0);
   };
 
-  add_net(sta["service"].to<JsonObject>(), settings.service_ssid, settings.service_password);
-  add_net(sta["customer_primary"].to<JsonObject>(), settings.customer_primary_ssid, settings.customer_primary_password);
-  add_net(sta["customer_secondary"].to<JsonObject>(), settings.customer_secondary_ssid, settings.customer_secondary_password);
+  add_net(sta["service"].to<JsonObject>(), client.service_ssid, client.service_password);
+  add_net(sta["customer_primary"].to<JsonObject>(), client.customer_primary_ssid, client.customer_primary_password);
+  add_net(sta["customer_secondary"].to<JsonObject>(), client.customer_secondary_ssid, client.customer_secondary_password);
 
   JsonObject soft_ap = root["soft_ap"].to<JsonObject>();
 
@@ -491,11 +492,10 @@ void ApiCoreV1::build_network(JsonObject root) {
     obj["enabled"] = enabled;
   };
 
-  add_ap(soft_ap["service_ap"].to<JsonObject>(), settings.service_ap_ssid, settings.service_ap_password,
-         settings.service_ap_enabled);
-  auto region_ap = soft_ap["region_ap"].to<JsonObject>();
-  add_ap(region_ap, settings.region_ap_ssid, settings.region_ap_password, settings.region_ap_enabled);
-  region_ap["sta_policy"] = (settings.region_ap_sta_policy == 1 ? "ap_only" : "apsta");
+  add_ap(soft_ap["service_ap"].to<JsonObject>(), ap.service_ap_ssid, ap.service_ap_password, ap.service_ap_enabled);
+  auto region_ap_obj = soft_ap["region_ap"].to<JsonObject>();
+  add_ap(region_ap_obj, ap.region_ap_ssid, ap.region_ap_password, ap.region_ap_enabled);
+  region_ap_obj["sta_policy"] = (ap.region_ap_sta_policy == 1 ? "ap_only" : "apsta");
 }
 
 void ApiCoreV1::build_network_scan(JsonObject root) {

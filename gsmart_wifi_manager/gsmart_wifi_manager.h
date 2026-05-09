@@ -15,7 +15,7 @@ struct WifiNetwork {
     std::string password;
 };
 
-struct WifiSettings {
+struct WifiSettingsClient {
     uint32_t magic;
     uint8_t version;
     char service_ssid[33];
@@ -24,6 +24,11 @@ struct WifiSettings {
     char customer_primary_password[65];
     char customer_secondary_ssid[33];
     char customer_secondary_password[65];
+};
+
+struct WifiSettingsAp {
+    uint32_t magic;
+    uint8_t version;
     char service_ap_ssid[33];
     char service_ap_password[65];
     bool service_ap_enabled;
@@ -72,8 +77,10 @@ public:
     void start_scan(bool manual = false);
     bool has_scan_results() const { return this->scan_cache_valid_; }
     const std::vector<WifiScanCacheItem> &get_scan_results() const { return this->scan_cache_; }
-    void save_settings();
-    const WifiSettings& get_settings() const { return settings_; }
+    void save_client_settings();
+    void save_ap_settings();
+    const WifiSettingsClient& get_client_settings() const { return client_settings_; }
+    const WifiSettingsAp& get_ap_settings() const { return ap_settings_; }
 
 protected:
     void load_settings();
@@ -93,8 +100,10 @@ protected:
 
     std::vector<WifiNetwork> manufacture_networks_;
     std::vector<WifiScanCacheItem> scan_cache_;
-    WifiSettings settings_;
-    ESPPreferenceObject pref_;
+    WifiSettingsClient client_settings_;
+    WifiSettingsAp ap_settings_;
+    ESPPreferenceObject client_pref_;
+    ESPPreferenceObject ap_pref_;
     
     uint32_t last_scan_time_ = 0;
     bool scan_pending_ = false;
