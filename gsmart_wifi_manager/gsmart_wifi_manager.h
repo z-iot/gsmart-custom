@@ -15,33 +15,31 @@ struct WifiNetwork {
   std::string password;
 };
 
-// sta_mode values: 0=off, 1=periodic, 2=on, 3=force
+// sta_mode values: 0=off, 1=on, 2=periodic, 3=force
 // cloud_mode values: 0=off, 1=service, 2=full, 3=stat, 4=periodic
 
 struct WifiSettingsClient {
   uint32_t magic;
   uint8_t version;
-  char customer_primary_ssid[33];
-  char customer_primary_password[65];
-  char customer_secondary_ssid[33];
-  char customer_secondary_password[65];
-  char service_ssid[33];
-  char service_password[65];
-  // v2 additions:
-  uint8_t sta_mode;          // 0=off, 1=periodic, 2=on, 3=force
-  bool service_use_defaults; // true: use hardcoded GSmartService-HS / 12345678
+  char customer_primary_ssid[33];      // default empty
+  char customer_primary_password[65];  // default empty
+  char customer_secondary_ssid[33];    // default empty
+  char customer_secondary_password[65];// default empty
+  uint8_t sta_mode;                    // 0=off, 1=on, 2=periodic, 3=force
+  char service_ssid[33];               // default GSmartService-HS
+  char service_password[65];           // default smart8888
+  uint8_t service_mode;                // 0=off, 1=on
 };
 
 struct WifiSettingsAp {
   uint32_t magic;
   uint8_t version;
-  char region_ap_ssid[33];
-  char region_ap_password[65];
-  uint8_t region_ap_channel; // v2: 0=auto, 1-14=specific WiFi channel
-  bool region_ap_enabled;
-  char service_ap_ssid[33];
-  char service_ap_password[65];
-  bool service_ap_enabled;
+  char region_ap_ssid[33];             // default empty
+  char region_ap_password[65];         // default empty
+  uint8_t region_ap_channel;           // 0=auto, 1-14=specific WiFi channel
+  uint8_t region_ap_mode;              // 0=off, 1=on
+  char service_ap_password[65];        // default 12345678 (SSID always Gsmart-<serial>)
+  uint8_t service_ap_mode;             // 0=off, 1=on
 };
 
 struct CloudSettings {
@@ -77,18 +75,17 @@ public:
 
   // STA management
   void set_sta_service(const std::string &ssid, const std::string &password,
-                       bool use_defaults);
+                       uint8_t mode);
   void set_sta_customer_primary(const std::string &ssid,
                                 const std::string &password);
   void set_sta_customer_secondary(const std::string &ssid,
                                   const std::string &password);
-  void set_sta_mode(uint8_t mode); // 0=off,1=periodic,2=on,3=force
+  void set_sta_mode(uint8_t mode); // 0=off,1=on,2=periodic,3=force
 
   // SoftAP management
-  void set_service_ap(const std::string &ssid, const std::string &password,
-                      bool enabled);
+  void set_service_ap(const std::string &password, uint8_t mode);
   void set_region_ap(const std::string &ssid, const std::string &password,
-                     bool enabled, uint8_t channel);
+                     uint8_t mode, uint8_t channel);
 
   // Cloud settings
   void set_cloud_mode(uint8_t mode); // 0=off,1=service,2=full,3=stat,4=periodic

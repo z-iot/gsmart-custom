@@ -485,22 +485,26 @@ void ApiCoreV1::build_network(JsonObject root) {
 
   JsonObject service_obj = sta["service"].to<JsonObject>();
   add_net(service_obj, client.service_ssid, client.service_password);
-  service_obj["use_defaults"] = client.service_use_defaults;
+  service_obj["mode"] = client.service_mode;
 
   add_net(sta["customer_primary"].to<JsonObject>(), client.customer_primary_ssid, client.customer_primary_password);
   add_net(sta["customer_secondary"].to<JsonObject>(), client.customer_secondary_ssid, client.customer_secondary_password);
 
   JsonObject soft_ap = root["soft_ap"].to<JsonObject>();
 
-  auto add_ap = [&](JsonObject obj, const char *ssid, const char *pswd, bool enabled) {
+  auto add_ap = [&](JsonObject obj, const char *ssid, const char *pswd, uint8_t mode) {
     obj["ssid"] = ssid;
     obj["password_set"] = (pswd[0] != 0);
-    obj["enabled"] = enabled;
+    obj["mode"] = mode;
   };
 
-  add_ap(soft_ap["service_ap"].to<JsonObject>(), ap.service_ap_ssid, ap.service_ap_password, ap.service_ap_enabled);
+  JsonObject svc_ap_obj = soft_ap["service_ap"].to<JsonObject>();
+  svc_ap_obj["ssid"] = "Gsmart-" + get_mac_address().substr(6);
+  svc_ap_obj["password_set"] = (ap.service_ap_password[0] != 0);
+  svc_ap_obj["mode"] = ap.service_ap_mode;
+
   JsonObject region_ap_obj = soft_ap["region_ap"].to<JsonObject>();
-  add_ap(region_ap_obj, ap.region_ap_ssid, ap.region_ap_password, ap.region_ap_enabled);
+  add_ap(region_ap_obj, ap.region_ap_ssid, ap.region_ap_password, ap.region_ap_mode);
   region_ap_obj["channel"] = ap.region_ap_channel;
 
   JsonObject cloud_obj = root["cloud"].to<JsonObject>();
@@ -563,8 +567,8 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     }
     if (sta["service"].is<JsonObject>()) {
       JsonObject s = sta["service"].as<JsonObject>();
-      bool use_defaults = json_bool(s["use_defaults"], true);
-      mgr->set_sta_service(json_string(s["ssid"]), json_string(s["password"]), use_defaults);
+      uint8_t mode = s["mode"].isNull() ? 1 : s["mode"].as<uint8_t>();
+      mgr->set_sta_service(json_string(s["ssid"]), json_string(s["password"]), mode);
       changed = true;
     }
     if (sta["customer_primary"].is<JsonObject>()) {
@@ -583,13 +587,13 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     JsonObject soft_ap = root["soft_ap"].as<JsonObject>();
     if (soft_ap["service_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["service_ap"].as<JsonObject>();
-      mgr->set_service_ap(json_string(s["ssid"]), json_string(s["password"]), json_bool(s["enabled"], true));
+      mgr->set_service_ap(json_string(s["password"]), s["mode"].isNull() ? 1 : s["mode"].as<uint8_t>());
       changed = true;
     }
     if (soft_ap["region_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["region_ap"].as<JsonObject>();
       uint8_t channel = s["channel"].isNull() ? 0 : s["channel"].as<uint8_t>();
-      mgr->set_region_ap(json_string(s["ssid"]), json_string(s["password"]), json_bool(s["enabled"], false), channel);
+      mgr->set_region_ap(json_string(s["ssid"]), json_string(s["password"]), s["mode"].isNull() ? 0 : s["mode"].as<uint8_t>(), channel);
       changed = true;
     }
   }
