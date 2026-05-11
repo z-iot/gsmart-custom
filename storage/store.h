@@ -75,7 +75,7 @@ namespace esphome
       
       void set_wifi_ap_active(bool active) {
         if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr) {
-          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", "", active);
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", active ? 1 : 0);
         }
       }
 
