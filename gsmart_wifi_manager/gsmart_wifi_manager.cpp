@@ -20,11 +20,17 @@ namespace gsmart_wifi_manager {
 
 static const char *const TAG = "gsmart_wifi_manager";
 static constexpr uint32_t WIFI_SETTINGS_CLIENT_PREF_ID = 99991201UL;
-static constexpr uint32_t WIFI_SETTINGS_AP_PREF_ID = 99991202UL;
-static constexpr uint32_t WIFI_SETTINGS_MAGIC = 0x47535746UL;  // GSWF
-static constexpr uint8_t WIFI_SETTINGS_VERSION = 1;
+static constexpr uint32_t WIFI_SETTINGS_AP_PREF_ID     = 99991202UL;
+static constexpr uint32_t WIFI_SETTINGS_CLOUD_PREF_ID  = 99991203UL;
+static constexpr uint32_t WIFI_SETTINGS_MAGIC           = 0x47535746UL;  // GSWF
+static constexpr uint8_t  WIFI_SETTINGS_CLIENT_VERSION  = 2;
+static constexpr uint8_t  WIFI_SETTINGS_AP_VERSION      = 2;
+static constexpr uint8_t  WIFI_SETTINGS_CLOUD_VERSION   = 1;
 static constexpr uint32_t SCAN_INTERVAL_MS = 60000UL;
 static constexpr uint32_t SCAN_POLL_TIMEOUT_MS = 12000UL;
+
+static constexpr const char *SERVICE_DEFAULT_SSID = "GSmartService-HS";
+static constexpr const char *SERVICE_DEFAULT_PWD  = "12345678";
 
 GsmartWifiManager *global_gsmart_wifi_manager = nullptr;
 
@@ -60,9 +66,12 @@ void GsmartWifiManager::dump_config() {
   ESP_LOGCONFIG(TAG, "  Customer Secondary SSID: %s", this->client_settings_.customer_secondary_ssid);
   ESP_LOGCONFIG(TAG, "  Service AP: %s (%s)", this->ap_settings_.service_ap_ssid,
                 this->ap_settings_.service_ap_enabled ? "enabled" : "disabled");
-  ESP_LOGCONFIG(TAG, "  Region AP: %s (%s, policy: %s)", this->ap_settings_.region_ap_ssid,
+  ESP_LOGCONFIG(TAG, "  Region AP: %s (%s, channel: %u)", this->ap_settings_.region_ap_ssid,
                 this->ap_settings_.region_ap_enabled ? "enabled" : "disabled",
-                this->ap_settings_.region_ap_sta_policy == 1 ? "ap_only" : "apsta");
+                this->ap_settings_.region_ap_channel);
+  ESP_LOGCONFIG(TAG, "  STA mode: %u  Service defaults: %s", this->client_settings_.sta_mode,
+                this->client_settings_.service_use_defaults ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Cloud mode: %u", this->cloud_settings_.cloud_mode);
 }
 
 void GsmartWifiManager::add_manufacture_network(const std::string &ssid, const std::string &password) {
@@ -77,12 +86,24 @@ void GsmartWifiManager::copy_string_(char *dest, size_t size, const std::string 
   dest[size - 1] = '\0';
 }
 
-void GsmartWifiManager::set_sta_service(const std::string &ssid, const std::string &password) {
-  this->copy_string_(this->client_settings_.service_ssid, sizeof(this->client_settings_.service_ssid), ssid);
-  this->copy_string_(this->client_settings_.service_password, sizeof(this->client_settings_.service_password), password,
-                     !ssid.empty());
+void GsmartWifiManager::set_sta_service(const std::string &ssid, const std::string &password, bool use_defaults) {
+  this->client_settings_.service_use_defaults = use_defaults;
+  if (!use_defaults) {
+    this->copy_string_(this->client_settings_.service_ssid, sizeof(this->client_settings_.service_ssid), ssid);
+    this->copy_string_(this->client_settings_.service_password, sizeof(this->client_settings_.service_password), password,
+                       !ssid.empty());
+  }
   this->save_client_settings();
   this->update_sta_priority();
+  this->reconnect_sta_();
+}
+
+void GsmartWifiManager::set_sta_mode(uint8_t mode) {
+  if (mode > 3) mode = 3;
+  this->client_settings_.sta_mode = mode;
+  this->save_client_settings();
+  this->update_sta_priority();
+  this->apply_wifi_state();
   this->reconnect_sta_();
 }
 
@@ -115,15 +136,26 @@ void GsmartWifiManager::set_service_ap(const std::string &ssid, const std::strin
 }
 
 void GsmartWifiManager::set_region_ap(const std::string &ssid, const std::string &password, bool enabled,
-                                      uint8_t sta_policy) {
+                                      uint8_t channel) {
   this->copy_string_(this->ap_settings_.region_ap_ssid, sizeof(this->ap_settings_.region_ap_ssid), ssid, true);
   this->copy_string_(this->ap_settings_.region_ap_password, sizeof(this->ap_settings_.region_ap_password), password, true);
   this->ap_settings_.region_ap_enabled = enabled;
-  this->ap_settings_.region_ap_sta_policy = sta_policy == 1 ? 1 : 0;
+  this->ap_settings_.region_ap_channel = (channel <= 14) ? channel : 0;
   this->save_ap_settings();
   this->update_sta_priority();
   this->apply_wifi_state();
   this->reconnect_sta_();
+}
+
+void GsmartWifiManager::set_cloud_mode(uint8_t mode) {
+  if (mode > 4) mode = 2;  // clamp; default to full
+  this->cloud_settings_.cloud_mode = mode;
+  this->save_cloud_settings();
+}
+
+void GsmartWifiManager::save_cloud_settings() {
+  this->cloud_pref_.save(&this->cloud_settings_);
+  global_preferences->sync();
 }
 
 bool GsmartWifiManager::is_connected() const {
@@ -192,37 +224,48 @@ void GsmartWifiManager::start_scan(bool manual) {
 void GsmartWifiManager::load_settings() {
   this->client_pref_ = global_preferences->make_preference<WifiSettingsClient>(WIFI_SETTINGS_CLIENT_PREF_ID);
   if (!this->client_pref_.load(&this->client_settings_) || this->client_settings_.magic != WIFI_SETTINGS_MAGIC ||
-      this->client_settings_.version != WIFI_SETTINGS_VERSION) {
-    ESP_LOGI(TAG, "Initializing default Client Wi-Fi settings");
+      this->client_settings_.version != WIFI_SETTINGS_CLIENT_VERSION) {
+    ESP_LOGI(TAG, "Initializing default Client Wi-Fi settings (v%u)", WIFI_SETTINGS_CLIENT_VERSION);
     std::memset(&this->client_settings_, 0, sizeof(WifiSettingsClient));
     this->client_settings_.magic = WIFI_SETTINGS_MAGIC;
-    this->client_settings_.version = WIFI_SETTINGS_VERSION;
-
+    this->client_settings_.version = WIFI_SETTINGS_CLIENT_VERSION;
+    this->client_settings_.sta_mode = 3;             // force (always connect)
+    this->client_settings_.service_use_defaults = true;
     this->copy_string_(this->client_settings_.service_ssid, sizeof(this->client_settings_.service_ssid),
-                       "GsmartServiceHS");
+                       SERVICE_DEFAULT_SSID);
     this->copy_string_(this->client_settings_.service_password, sizeof(this->client_settings_.service_password),
-                       "smart8888");
-
+                       SERVICE_DEFAULT_PWD);
     this->save_client_settings();
   }
 
   this->ap_pref_ = global_preferences->make_preference<WifiSettingsAp>(WIFI_SETTINGS_AP_PREF_ID);
   if (!this->ap_pref_.load(&this->ap_settings_) || this->ap_settings_.magic != WIFI_SETTINGS_MAGIC ||
-      this->ap_settings_.version != WIFI_SETTINGS_VERSION) {
-    ESP_LOGI(TAG, "Initializing default AP Wi-Fi settings");
+      this->ap_settings_.version != WIFI_SETTINGS_AP_VERSION) {
+    ESP_LOGI(TAG, "Initializing default AP Wi-Fi settings (v%u)", WIFI_SETTINGS_AP_VERSION);
     std::memset(&this->ap_settings_, 0, sizeof(WifiSettingsAp));
     this->ap_settings_.magic = WIFI_SETTINGS_MAGIC;
-    this->ap_settings_.version = WIFI_SETTINGS_VERSION;
+    this->ap_settings_.version = WIFI_SETTINGS_AP_VERSION;
 
     std::string default_ap_ssid = "Gsmart-" + get_mac_address().substr(6);
     this->copy_string_(this->ap_settings_.service_ap_ssid, sizeof(this->ap_settings_.service_ap_ssid), default_ap_ssid);
     this->copy_string_(this->ap_settings_.service_ap_password, sizeof(this->ap_settings_.service_ap_password),
-                       "12345678");
+                       SERVICE_DEFAULT_PWD);
     this->ap_settings_.service_ap_enabled = false;
     this->ap_settings_.region_ap_enabled = false;
-    this->ap_settings_.region_ap_sta_policy = 0;
+    this->ap_settings_.region_ap_channel = 0;        // auto
 
     this->save_ap_settings();
+  }
+
+  this->cloud_pref_ = global_preferences->make_preference<CloudSettings>(WIFI_SETTINGS_CLOUD_PREF_ID);
+  if (!this->cloud_pref_.load(&this->cloud_settings_) || this->cloud_settings_.magic != WIFI_SETTINGS_MAGIC ||
+      this->cloud_settings_.version != WIFI_SETTINGS_CLOUD_VERSION) {
+    ESP_LOGI(TAG, "Initializing default Cloud settings (v%u)", WIFI_SETTINGS_CLOUD_VERSION);
+    std::memset(&this->cloud_settings_, 0, sizeof(CloudSettings));
+    this->cloud_settings_.magic = WIFI_SETTINGS_MAGIC;
+    this->cloud_settings_.version = WIFI_SETTINGS_CLOUD_VERSION;
+    this->cloud_settings_.cloud_mode = 2;            // full (backward-compatible default)
+    this->save_cloud_settings();
   }
 }
 
@@ -243,15 +286,21 @@ void GsmartWifiManager::update_sta_priority() {
 
   wifi->clear_sta();
 
-  if (this->ap_settings_.region_ap_enabled && this->ap_settings_.region_ap_sta_policy == 1 &&
-      !this->ap_settings_.service_ap_enabled) {
-    ESP_LOGI(TAG, "Region AP_ONLY policy active; STA list disabled");
+  if (this->client_settings_.sta_mode == 0) {
+    ESP_LOGI(TAG, "STA mode OFF; STA list disabled");
     wifi->init_sta(0);
     return;
   }
 
+  const char *svc_ssid = this->client_settings_.service_use_defaults
+      ? SERVICE_DEFAULT_SSID
+      : this->client_settings_.service_ssid;
+  const char *svc_pwd = this->client_settings_.service_use_defaults
+      ? SERVICE_DEFAULT_PWD
+      : this->client_settings_.service_password;
+
   size_t count = this->manufacture_networks_.size();
-  if (this->client_settings_.service_ssid[0] != '\0')
+  if (svc_ssid[0] != '\0')
     count++;
   if (this->client_settings_.customer_primary_ssid[0] != '\0')
     count++;
@@ -268,10 +317,10 @@ void GsmartWifiManager::update_sta_priority() {
     wifi->add_sta(ap);
   }
 
-  if (this->client_settings_.service_ssid[0] != '\0') {
+  if (svc_ssid[0] != '\0') {
     wifi::WiFiAP ap;
-    ap.set_ssid(this->client_settings_.service_ssid);
-    ap.set_password(this->client_settings_.service_password);
+    ap.set_ssid(svc_ssid);
+    ap.set_password(svc_pwd);
     ap.set_priority(50);
     wifi->add_sta(ap);
   }
@@ -307,15 +356,16 @@ void GsmartWifiManager::apply_wifi_state() {
     ssid = this->ap_settings_.region_ap_ssid;
     password = this->ap_settings_.region_ap_password;
     active = true;
-    ap_only = this->ap_settings_.region_ap_sta_policy == 1;
+    ap_only = this->client_settings_.sta_mode == 0;
   }
 
-  this->apply_soft_ap_(active, ssid, password, ap_only);
+  this->apply_soft_ap_(active, ssid, password, ap_only, this->ap_settings_.region_ap_channel);
   if (active)
     this->start_scan(true);
 }
 
-void GsmartWifiManager::apply_soft_ap_(bool active, const std::string &ssid, const std::string &password, bool ap_only) {
+void GsmartWifiManager::apply_soft_ap_(bool active, const std::string &ssid, const std::string &password, bool ap_only,
+                                       uint8_t channel) {
   if (wifi::global_wifi_component != nullptr) {
     wifi::WiFiAP ap;
     ap.set_ssid(ssid);
@@ -341,7 +391,7 @@ void GsmartWifiManager::apply_soft_ap_(bool active, const std::string &ssid, con
     wifi_config_t conf = {};
     std::memcpy(reinterpret_cast<char *>(conf.ap.ssid), ssid.c_str(), std::min<size_t>(ssid.size(), 32));
     conf.ap.ssid_len = std::min<size_t>(ssid.size(), 32);
-    conf.ap.channel = 1;
+    conf.ap.channel = (channel >= 1 && channel <= 14) ? channel : 1;
     conf.ap.ssid_hidden = 0;
     conf.ap.max_connection = 5;
     conf.ap.beacon_interval = 100;
@@ -418,7 +468,10 @@ uint8_t GsmartWifiManager::priority_for_ssid_(const std::string &ssid) const {
     if (net.ssid == ssid)
       return 100;
   }
-  if (ssid == this->client_settings_.service_ssid)
+  const char *svc_ssid = this->client_settings_.service_use_defaults
+      ? SERVICE_DEFAULT_SSID
+      : this->client_settings_.service_ssid;
+  if (svc_ssid[0] != '\0' && ssid == svc_ssid)
     return 50;
   if (ssid == this->client_settings_.customer_primary_ssid)
     return 10;
@@ -432,7 +485,10 @@ uint8_t GsmartWifiManager::current_sta_priority_() const { return this->priority
 uint8_t GsmartWifiManager::highest_configured_sta_priority_() const {
   if (!this->manufacture_networks_.empty())
     return 100;
-  if (this->client_settings_.service_ssid[0] != '\0')
+  const char *svc_ssid = this->client_settings_.service_use_defaults
+      ? SERVICE_DEFAULT_SSID
+      : this->client_settings_.service_ssid;
+  if (svc_ssid[0] != '\0')
     return 50;
   if (this->client_settings_.customer_primary_ssid[0] != '\0')
     return 10;
