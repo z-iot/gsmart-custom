@@ -1,6 +1,7 @@
 #pragma once
 
 #include "udp_global.h"
+#include "esphome/components/storage/util.h"
 // #include "esphome/components/json/json_util.h"
 
 namespace esphome
@@ -13,8 +14,9 @@ namespace esphome
       // DeviceItem();
 
       uint8_t mac[6];
+      uint64_t region_id;
       uint8_t ip[4];
-      uint8_t channel;
+      uint16_t channel;
       uint8_t model;
       uint8_t build[2];
       uint32_t time;
@@ -35,6 +37,7 @@ namespace esphome
       bool updateFromSysInfo(PacketSysInfo *packet)
       {
         memcpy(mac, packet->mac, sizeof(mac));
+        region_id = packet->region_id;
         memcpy(ip, packet->ip, sizeof(ip));
         channel = packet->channel;
         model = packet->model;
@@ -54,11 +57,14 @@ namespace esphome
       void toJson(JsonObject &root)
       {
         root["mac"] = macToStr(this->mac);
+        root["regionId"] = storage::convertRegionSerialtoStr(this->region_id);
         root["ip"] = ipToStr(this->ip);
         root["channel"] = this->channel;
-        root["model"] = this->model;
+        root["model"] = storage::convertModelToStr(this->model);
+        root["modelNum"] = this->model;
         root["build"] = str_sprintf("%d.%d", this->build[0], this->build[1]);
         root["time"] = this->time;
+        root["lastSeenMs"] = this->last_update;
         root["name"] = String(this->name);
       }
 

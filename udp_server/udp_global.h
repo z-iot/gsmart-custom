@@ -7,7 +7,7 @@
 #define MESSAGE_STATUSINFO_REPEAT_SEC 60
 #define MESSAGE_IDENTITYINFO_REPEAT_SEC 5*60
 
-#define UDP_PROTOCOL_VERSION 1
+#define UDP_PROTOCOL_VERSION 2
 #define DEVICE_MODEL_UNKNOWN 0
 
 namespace esphome
@@ -105,8 +105,9 @@ namespace esphome
     struct PacketSysInfo
     {
       uint8_t mac[6];
+      uint64_t region_id;
       uint8_t ip[4];
-      uint8_t channel;
+      uint16_t channel;
       uint8_t model;
       uint8_t build[2];
       uint32_t time;
@@ -122,6 +123,7 @@ namespace esphome
     struct PacketControl
     {
       uint8_t mac[6];
+      uint64_t region_id;
       storage::RadiationMode mode;
       KindRadiationSource source;
     };
@@ -131,6 +133,7 @@ namespace esphome
     struct PacketStatus
     {
       uint8_t mac[6];
+      uint64_t region_id;
       KindStatusEvent event;
       storage::RadiationMode radiation;
       KindRadiationSource radiationSource;
@@ -152,6 +155,7 @@ namespace esphome
     struct PacketIdentity
     {
       uint8_t mac[6];
+      uint64_t region_id;
       uint8_t ip[4];
       uint8_t model;
       // uint8_t build[2];
@@ -172,11 +176,13 @@ namespace esphome
     struct PacketReconfig
     {
       uint8_t mac[6];
+      uint64_t region_id;
     };
 
     struct PacketPing
     {
       uint8_t mac[6];
+      uint64_t region_id;
     };
   }
 }

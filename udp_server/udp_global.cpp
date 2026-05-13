@@ -133,6 +133,7 @@ namespace esphome
       return json::build_json([packet](JsonObject root)
                               { 
                                 root["mac"] = macToStr(packet.mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
                                 root["mode"] = radiationModeToStr(packet.mode);
                                 root["source"] = kindRadiationSourceToStr(packet.source); });
     }
@@ -142,6 +143,7 @@ namespace esphome
       return json::build_json([packet](JsonObject root)
                               { 
                                 root["mac"] = macToStr(packet.mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
                                 root["event"] = kindStatusEventToStr(packet.event);
                                 root["radiation"] = radiationModeToStr(packet.radiation);
                                 root["radiationSource"] = kindRadiationSourceToStr(packet.radiationSource);
@@ -155,6 +157,7 @@ namespace esphome
       return json::build_json([packet](JsonObject root)
                               { 
                                 root["mac"] = macToStr(packet.mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
                                 root["ip"] = ipToStr(packet.ip);
                                 root["model"] = storage::convertModelToStr(packet.model);
                                 root["time"] = packet.time;

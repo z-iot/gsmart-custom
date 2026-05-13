@@ -28,6 +28,14 @@ namespace esphome
       RegionMember members[16];
     };
 
+    struct RegionMetadata
+    {
+      char name[48] = {0};
+      char description[128] = {0};
+      uint16_t udpChannel = 0;
+      uint32_t configVersion = 0;
+    };
+
     class DataRegion
     {
 
@@ -74,6 +82,24 @@ namespace esphome
         recalculateLayout();
       }
 
+      void loadMetadataFromJson(JsonObject &root)
+      {
+        if (!root["regionName"].isNull())
+          copyString(this->metadata.name, sizeof(this->metadata.name), root["regionName"].as<std::string>());
+        if (!root["name"].isNull())
+          copyString(this->metadata.name, sizeof(this->metadata.name), root["name"].as<std::string>());
+        if (!root["regionDescription"].isNull())
+          copyString(this->metadata.description, sizeof(this->metadata.description), root["regionDescription"].as<std::string>());
+        if (!root["description"].isNull())
+          copyString(this->metadata.description, sizeof(this->metadata.description), root["description"].as<std::string>());
+        if (!root["udpChannel"].isNull())
+          this->metadata.udpChannel = root["udpChannel"].as<uint16_t>();
+        if (!root["regionNum"].isNull())
+          this->metadata.udpChannel = root["regionNum"].as<uint16_t>();
+        if (!root["configVersion"].isNull())
+          this->metadata.configVersion = root["configVersion"].as<uint32_t>();
+      }
+
       void recalculateLayout()
       {
         // pozriet na ktorom mieste je vlastna mac adresa = selfIndex
@@ -94,6 +120,11 @@ namespace esphome
       {
         root["serial"] = convertRegionSerialtoStr(this->layout.serial); // TODO
         root["mst"] = this->layout.masterIndex;
+        root["regionName"] = this->metadata.name;
+        root["regionDescription"] = this->metadata.description;
+        root["udpChannel"] = this->metadata.udpChannel;
+        root["regionNum"] = this->metadata.udpChannel;
+        root["configVersion"] = this->metadata.configVersion;
         JsonArray memArray = root["mem"].to<JsonArray>();
         for (int i = 0; i < this->layout.memberCount; i++)
         {
@@ -115,10 +146,22 @@ namespace esphome
 
       void setup();
       void save();
+      void saveMetadata();
 
       RegionLayout layout;
+      RegionMetadata metadata;
       int16_t selfIndex = -1;
       ESPPreferenceObject pref{};
+      ESPPreferenceObject metadata_pref{};
+
+    protected:
+      void copyString(char *target, size_t target_size, const std::string &value)
+      {
+        if (target_size == 0)
+          return;
+        strncpy(target, value.c_str(), target_size - 1);
+        target[target_size - 1] = 0;
+      }
     };
 
   }

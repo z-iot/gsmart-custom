@@ -292,7 +292,9 @@ void ApiCoreV1::build_info(JsonObject root) {
   uint8_t build_lo = 0;
   storage::store->getBuildNumber(build_hi, build_lo);
 
-  root["api"] = "mobile.v1";
+  root["api"] = "g-node.v1";
+  JsonArray aliases = root["apiAliases"].to<JsonArray>();
+  aliases.add("mobile.v1");
   root["model"] = storage::store->get_model();
   root["modelNum"] = storage::store->get_model_num();
   root["serial"] = storage::store->get_serial();
@@ -353,8 +355,10 @@ void ApiCoreV1::build_status(JsonObject root) {
   JsonObject region = root["region"].to<JsonObject>();
   region["active"] = storage::store->region->isRegionActive();
   region["isMaster"] = storage::store->region->isMaster();
+  region["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
   region["selfIndex"] = storage::store->region->selfIndex;
   region["masterIndex"] = storage::store->region->layout.masterIndex;
+  region["udpChannel"] = storage::store->region->metadata.udpChannel;
 #endif
 }
 
@@ -629,6 +633,11 @@ void ApiCoreV1::build_region(JsonObject root) {
 #ifdef GSMART_FEATURE_REGION
   storage::store->region->saveToJson(root);
   root["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+  root["regionName"] = storage::store->region->metadata.name;
+  root["regionDescription"] = storage::store->region->metadata.description;
+  root["udpChannel"] = storage::store->region->metadata.udpChannel;
+  root["regionNum"] = storage::store->region->metadata.udpChannel;
+  root["configVersion"] = storage::store->region->metadata.configVersion;
   root["masterIndex"] = storage::store->region->layout.masterIndex;
   root["selfIndex"] = storage::store->region->selfIndex;
   root["isMaster"] = storage::store->region->isMaster();
@@ -657,6 +666,12 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     region_id = json_string(root["serial"]);
   if (!region_id.empty())
     storage::store->region->layout.serial = storage::convertRegionSerialtoNum(region_id);
+
+  storage::store->region->loadMetadataFromJson(root);
+#ifdef USE_UDPSERVER
+  if (udp_server::udpServer != nullptr && storage::store->region->metadata.udpChannel != 0)
+    udp_server::udpServer->changeChannel(storage::store->region->metadata.udpChannel);
+#endif
 
   if (root["members"].is<JsonArray>()) {
     JsonDocument compact_doc;
@@ -696,9 +711,17 @@ bool ApiCoreV1::apply_region(JsonObject root) {
 
     compact["mst"] = master_index;
     storage::store->region->reloadFromJson(compact);
+#ifdef USE_UDPSERVER
+    if (udp_server::udpServer != nullptr)
+      udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
+#endif
     return true;
   } else {
     storage::store->region->reloadFromJson(root);
+#ifdef USE_UDPSERVER
+    if (udp_server::udpServer != nullptr)
+      udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
+#endif
     return true;
   }
 #endif

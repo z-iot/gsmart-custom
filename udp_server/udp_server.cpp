@@ -63,10 +63,26 @@ namespace esphome
       return modelNumber;
     }
 
+    uint64_t UdpServer::currentRegionId() const
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr)
+        return storage::store->region->layout.serial;
+#endif
+      return 0;
+    }
+
+    bool UdpServer::packetRegionAllowed(uint64_t region_id) const
+    {
+      const uint64_t current_region_id = this->currentRegionId();
+      return current_region_id != 0 && region_id == current_region_id;
+    }
+
     void UdpServer::sendSysInfo()
     {
-      PacketSysInfo packet;
+      PacketSysInfo packet{};
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       IPAddress ip = WiFi.localIP();
       for (int i = 0; i < 4; i++)
         packet.ip[i] = ip[i];
@@ -82,8 +98,9 @@ namespace esphome
       packet.time = millis();
       packet.model = this->getModelNumber();
       std::string modelName = this->getModelName();
-      auto name = str_sprintf("%s %02X%02X%02X", modelName.c_str(), packet.mac[3], packet.mac[4], packet.mac[5]).c_str();
-      strncpy(packet.name, name, sizeof(packet.name) - 1);
+      auto name = str_sprintf("%s %02X%02X%02X", modelName.c_str(), packet.mac[3], packet.mac[4], packet.mac[5]);
+      strncpy(packet.name, name.c_str(), sizeof(packet.name) - 1);
+      packet.name[sizeof(packet.name) - 1] = 0;
       sendMessage(true, PacketKind::SYS_INFO, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
@@ -96,15 +113,17 @@ namespace esphome
 
     void UdpServer::sendPingReq()
     {
-      PacketPing packet;
+      PacketPing packet{};
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::PING_REQ, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
     void UdpServer::sendPingRes()
     {
-      PacketPing packet;
+      PacketPing packet{};
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::PING_RES, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
@@ -117,39 +136,45 @@ namespace esphome
       packet.time = millis();
       packet.model = this->getModelNumber();
       std::string modelName = this->getModelName();
-      auto name = str_sprintf("%s %02X%02X%02X", modelName.c_str(), packet.mac[3], packet.mac[4], packet.mac[5]).c_str();
-      strncpy(packet.name, name, sizeof(packet.name) - 1);
+      auto name = str_sprintf("%s %02X%02X%02X", modelName.c_str(), packet.mac[3], packet.mac[4], packet.mac[5]);
+      strncpy(packet.name, name.c_str(), sizeof(packet.name) - 1);
+      packet.name[sizeof(packet.name) - 1] = 0;
       sendIdentity(packet);
     }
 
     void UdpServer::sendControl(PacketControl packet)
     {
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::CONTROL, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
     void UdpServer::sendStatus(PacketStatus packet)
     {
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::STATUS, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
     void UdpServer::sendIdentity(PacketIdentity packet)
     {
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::IDENTITY, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
     void UdpServer::sendReconfig(PacketReconfig packet)
     {
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       sendMessage(false, PacketKind::RECONFIG, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
     PacketStatus UdpServer::fillStatus()
     {
-      PacketStatus packet;
+      PacketStatus packet{};
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       packet.event = KindStatusEvent::INTERVAL;
       packet.radiation = storage::RadiationMode::OFF;
       packet.radiationSource = KindRadiationSource::SOURCE_UNKNOWN;
@@ -162,8 +187,9 @@ namespace esphome
 
     PacketIdentity UdpServer::fillIdentity()
     {
-      PacketIdentity packet;
+      PacketIdentity packet{};
       get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
       this->identity_fill_callback_.call(packet);
       return packet;
     }
@@ -195,6 +221,10 @@ namespace esphome
 
     void UdpServer::setup()
     {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr && storage::store->region->metadata.udpChannel != 0)
+        this->changeChannel(storage::store->region->metadata.udpChannel);
+#endif
       this->set_timeout("SysInfoInit", 3000, [this]
                         { this->sendSysInfo(); });
       this->set_interval(MESSAGE_SYSINFO_REPEAT_SEC * 1000, [this]()
@@ -375,17 +405,27 @@ namespace esphome
       char remote_ip[network::IP_ADDRESS_BUFFER_SIZE];
       ESP_LOGD(TAG, "Receive packet %s: from: %s:%u, kind: %u, body size %zu.", main ? "main" : "channel", network::IPAddress(remoteIP).str_to(remote_ip), remotePort, static_cast<uint8_t>(packet.header.packetKind), packet.body.size());
 
+      if (packet.header.mark[0] != UdpPacket_Mark[0] || packet.header.mark[1] != UdpPacket_Mark[1])
+      {
+        ESP_LOGD(TAG, "Ignoring UDP packet with invalid marker.");
+        return;
+      }
+
+      if (packet.header.protocol_ver != UDP_PROTOCOL_VERSION)
+      {
+        ESP_LOGD(TAG, "Ignoring UDP packet with protocol version %u; expected %u.", packet.header.protocol_ver, UDP_PROTOCOL_VERSION);
+        return;
+      }
+
       switch (packet.header.packetKind)
       {
       case PacketKind::SYS_INFO:
         if (packet.body.size() == sizeof(PacketSysInfo))
         {
-          // auto *data = packet.body.data();
-          // PacketSysInfo *packetSysInfo = reinterpret_cast<PacketSysInfo *>(data);
-          // // auto deviceItem = this->GlobalDevices.updateFromSysInfo(packetSysInfo);
-          // auto deviceItem = new DeviceItem();
-          // deviceItem->updateFromSysInfo(packetSysInfo);
-          // this->neighbor_callback_.call(deviceItem);
+          auto *data = packet.body.data();
+          PacketSysInfo *packetSysInfo = reinterpret_cast<PacketSysInfo *>(data);
+          auto deviceItem = this->GlobalDevices.updateFromSysInfo(packetSysInfo);
+          this->neighbor_callback_.call(deviceItem);
         }
         break;
       case PacketKind::PING_REQ:
@@ -393,6 +433,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketPing *packetPing = reinterpret_cast<PacketPing *>(data);
+          if (!this->packetRegionAllowed(packetPing->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring PingReq for another region.");
+            break;
+          }
           auto mac = str_sprintf("%02X%02X%02X", packetPing->mac[3], packetPing->mac[4], packetPing->mac[5]).c_str();
           ESP_LOGI(TAG, "PingReq received %s.", mac);
           this->sendPingRes();
@@ -403,6 +448,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketPing *packetPing = reinterpret_cast<PacketPing *>(data);
+          if (!this->packetRegionAllowed(packetPing->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring PingRes for another region.");
+            break;
+          }
           auto mac = str_sprintf("%02X%02X%02X", packetPing->mac[3], packetPing->mac[4], packetPing->mac[5]).c_str();
           ESP_LOGI(TAG, "PingRes received %s.", mac);
         }
@@ -412,6 +462,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketControl *packetControl = reinterpret_cast<PacketControl *>(data);
+          if (!this->packetRegionAllowed(packetControl->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring Control for another region.");
+            break;
+          }
           this->control_callback_.call(*packetControl);
         }
         break;
@@ -420,6 +475,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketStatus *packetStatus = reinterpret_cast<PacketStatus *>(data);
+          if (!this->packetRegionAllowed(packetStatus->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring Status for another region.");
+            break;
+          }
           this->status_callback_.call(*packetStatus);
         }
         break;
@@ -428,6 +488,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketIdentity *packetIdentity = reinterpret_cast<PacketIdentity *>(data);
+          if (!this->packetRegionAllowed(packetIdentity->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring Identity for another region.");
+            break;
+          }
           this->identity_callback_.call(*packetIdentity);
         }
         break;
@@ -436,6 +501,11 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketReconfig *packetReconfig = reinterpret_cast<PacketReconfig *>(data);
+          if (!this->packetRegionAllowed(packetReconfig->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring Reconfig for another region.");
+            break;
+          }
           this->reconfig_callback_.call(*packetReconfig);
         }
         break;
@@ -475,7 +545,7 @@ namespace esphome
 
     void UdpServer::sendControlRadiation(storage::RadiationMode mode, KindRadiationSource source)
     {
-      PacketControl packet;
+      PacketControl packet{};
       packet.mode = mode;
       packet.source = source;
       sendControl(packet);

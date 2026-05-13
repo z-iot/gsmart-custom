@@ -30,85 +30,106 @@ void ApiAdapterRest::setup() {
     ESP_LOGE("api_adapter_rest", "Web server not initialized, skipping REST API setup");
     return;
   }
-  std::string base_path = "/api/mobile/" + this->core_->get_version_path();
 
-  // GET Info
-  web_server_base::on(server, (base_path + "/info").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_info(root); });
-  });
+  auto register_routes = [this, server](const std::string &base_path) {
+    // GET Info
+    web_server_base::on(server, (base_path + "/info").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_info(root); });
+    });
 
-  // GET Status
-  web_server_base::on(server, (base_path + "/status").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_status(root); });
-  });
+    // GET Status
+    web_server_base::on(server, (base_path + "/status").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_status(root); });
+    });
 
-  // GET Diagnostics
-  web_server_base::on(server, (base_path + "/diagnostics").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_diagnostics(root); });
-  });
+    // GET Diagnostics
+    web_server_base::on(server, (base_path + "/diagnostics").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_diagnostics(root); });
+    });
 
-  // GET Consumption
-  web_server_base::on(server, (base_path + "/consumption").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_consumption(root); });
-  });
+    // GET Consumption
+    web_server_base::on(server, (base_path + "/consumption").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_consumption(root); });
+    });
 
-  // GET/POST Network
-  web_server_base::on(server, (base_path + "/network").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_network(root); });
-  });
-  web_server_base::on_post_json(server, (base_path + "/network").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    bool applied = this->core_->apply_network(root);
-    send_ok(request, [applied](JsonObject res) { res["applied"] = applied; });
-  });
-  web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject res) { this->core_->build_network_scan(res); });
-  });
+    // Network
+    web_server_base::on(server, (base_path + "/network").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_network(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/network").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool applied = this->core_->apply_network(root);
+      send_ok(request, [applied](JsonObject res) { res["applied"] = applied; });
+    });
+    web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject res) { this->core_->build_network_scan(res); });
+    });
+    web_server_base::on(server, (base_path + "/network/mqtt").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_mqtt(root); });
+    });
 
-  // POST Control Mode
-  web_server_base::on_post_json(server, (base_path + "/control/mode").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    send_json(request, [this, root](JsonObject res) { this->core_->handle_control_mode(root, res); });
-  });
+    // Control
+    web_server_base::on_post_json(server, (base_path + "/control/mode").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_control_mode(root, res); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/control/identify").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });
+    });
 
-  // POST Control Identify
-  web_server_base::on_post_json(server, (base_path + "/control/identify").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    send_json(request, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });
-  });
+    // Scheduler
+    web_server_base::on(server, (base_path + "/scheduler").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_scheduler(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/scheduler").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool ok = this->core_->apply_scheduler(root);
+      send_ok(request, [ok](JsonObject res) { res["saved"] = ok; });
+    });
+    web_server_base::on_post_json(server, (base_path + "/scheduler/state").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool ok = this->core_->apply_scheduler_state(root);
+      send_ok(request, [ok](JsonObject res) { res["saved"] = ok; });
+    });
 
-  // Scheduler
-  web_server_base::on(server, (base_path + "/scheduler").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_scheduler(root); });
-  });
-  web_server_base::on_post_json(server, (base_path + "/scheduler").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    bool ok = this->core_->apply_scheduler(root);
-    send_ok(request, [ok](JsonObject res) { res["saved"] = ok; });
-  });
+    // Region
+    web_server_base::on(server, (base_path + "/region").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_region(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/region").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool saved = this->core_->apply_region(root);
+      send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
+    });
+    web_server_base::on(server, (base_path + "/region/devices").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_region_devices(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/region/ping").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      this->core_->ping_region();
+      send_ok(request, [root](JsonObject res) {
+        res["sent"] = true;
+        if (!root["regionId"].isNull())
+          res["regionId"] = root["regionId"].as<std::string>();
+        res["responses"].to<JsonArray>();
+      });
+    });
 
-  // Region
-  web_server_base::on(server, (base_path + "/region").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_region(root); });
-  });
-  web_server_base::on_post_json(server, (base_path + "/region").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    bool saved = this->core_->apply_region(root);
-    send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
-  });
+    // Settings: Consumables (lamp hours, power, etc.)
+    web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_settings_consumables(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/settings/consumables").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool saved = this->core_->apply_settings_consumables(root);
+      send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
+    });
 
-  // Settings: Consumables (lamp hours, power, etc.)
-  web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_settings_consumables(root); });
-  });
-  web_server_base::on_post_json(server, (base_path + "/settings/consumables").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    bool saved = this->core_->apply_settings_consumables(root);
-    send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
-  });
+    // Settings: Modes (min/std/max timing config)
+    web_server_base::on(server, (base_path + "/settings/modes").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_settings_modes(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/settings/modes").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      bool saved = this->core_->apply_settings_modes(root);
+      send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
+    });
+  };
 
-  // Settings: Modes (min/std/max timing config)
-  web_server_base::on(server, (base_path + "/settings/modes").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
-    send_json(request, [this](JsonObject root) { this->core_->build_settings_modes(root); });
-  });
-  web_server_base::on_post_json(server, (base_path + "/settings/modes").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-    bool saved = this->core_->apply_settings_modes(root);
-    send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
-  });
+  register_routes("/api/g-node/" + this->core_->get_version_path());
+  register_routes("/api/mobile/" + this->core_->get_version_path());
 
   // Aliases (for backward compatibility)
   web_server_base::on(server, "/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {

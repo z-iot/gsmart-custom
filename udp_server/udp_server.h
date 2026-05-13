@@ -124,6 +124,8 @@ namespace esphome
       void processPacket(bool main, IPAddress remoteIP, uint16_t remotePort, PacketUdpServer &packet);
 
       void sendMessage(bool main, PacketKind kind, const uint8_t *bodyData, uint16_t bodyLen);
+      uint64_t currentRegionId() const;
+      bool packetRegionAllowed(uint64_t region_id) const;
 
       IPAddress getIp(bool main);
       uint16_t getPort(bool main);

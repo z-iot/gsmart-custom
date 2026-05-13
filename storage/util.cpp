@@ -31,7 +31,7 @@ namespace esphome
       if (model == "aqua")
         return 22;
       if (model == "mobi")
-        return 32;
+        return 23;
       if (model == "rex")
         return 51;
       if (model == "panel")
@@ -44,7 +44,7 @@ namespace esphome
       if (serial == 0)
         return "";
       char buffer[20];
-      sprintf(buffer, "%014llX", serial);
+      sprintf(buffer, "%016llX", serial);
       auto str = std::string(buffer);
       std::transform(str.begin(), str.end(), str.begin(), ::tolower);
       return str;
@@ -52,7 +52,7 @@ namespace esphome
 
     uint64_t convertRegionSerialtoNum(std::string serial)
     {
-      if (serial.length() != 14)
+      if (serial.length() != 14 && serial.length() != 16)
         return 0;
       return strtoull(serial.c_str(), NULL, 16);
     }
