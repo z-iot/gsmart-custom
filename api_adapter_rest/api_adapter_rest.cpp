@@ -100,13 +100,7 @@ void ApiAdapterRest::setup() {
       send_json(request, [this](JsonObject root) { this->core_->build_region_devices(root); });
     });
     web_server_base::on_post_json(server, (base_path + "/region/ping").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
-      this->core_->ping_region();
-      send_ok(request, [root](JsonObject res) {
-        res["sent"] = true;
-        if (!root["regionId"].isNull())
-          res["regionId"] = root["regionId"].as<std::string>();
-        res["responses"].to<JsonArray>();
-      });
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_region_ping(root, res); });
     });
 
     // Settings: Consumables (lamp hours, power, etc.)

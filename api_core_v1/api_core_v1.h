@@ -40,6 +40,7 @@ class ApiCoreV1 : public Component {
   bool apply_region(JsonObject root);
   void build_region_devices(JsonObject root);
   void ping_region();
+  void handle_region_ping(JsonObject root, JsonObject response);
 
   // Scheduler
   void build_scheduler(JsonObject root);

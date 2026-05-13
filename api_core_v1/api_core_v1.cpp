@@ -544,18 +544,27 @@ bool ApiCoreV1::apply_network(JsonObject root) {
   if (mgr == nullptr)
     return false;
 
+  const auto &client_settings = mgr->get_client_settings();
+  const auto &ap_settings = mgr->get_ap_settings();
+
+  auto json_or_current = [](JsonVariant value, const char *fallback) -> std::string {
+    if (value.isNull())
+      return std::string(fallback);
+    return value.as<std::string>();
+  };
+
   bool changed = false;
 
   // Legacy mapping
   if (!root["wifi_ssid"].isNull()) {
-    mgr->set_sta_customer_primary(root["wifi_ssid"].as<std::string>(), json_string(root["wifi_password"]));
+    mgr->set_sta_customer_primary(root["wifi_ssid"].as<std::string>(), json_or_current(root["wifi_password"], client_settings.customer_primary_password));
     changed = true;
   }
 
   if (root["client"].is<JsonObject>()) {
-    JsonObject client = root["client"].as<JsonObject>();
-    std::string ssid = json_string(client["ssid"]);
-    std::string password = json_string(client["password"]);
+    JsonObject client_obj = root["client"].as<JsonObject>();
+    std::string ssid = json_string(client_obj["ssid"]);
+    std::string password = json_or_current(client_obj["password"], client_settings.customer_primary_password);
     if (!ssid.empty()) {
       mgr->set_sta_customer_primary(ssid, password);
       changed = true;
@@ -571,18 +580,18 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     }
     if (sta["service"].is<JsonObject>()) {
       JsonObject s = sta["service"].as<JsonObject>();
-      uint8_t mode = s["mode"].isNull() ? 1 : s["mode"].as<uint8_t>();
-      mgr->set_sta_service(json_string(s["ssid"]), json_string(s["password"]), mode);
+      uint8_t mode = s["mode"].isNull() ? client_settings.service_mode : s["mode"].as<uint8_t>();
+      mgr->set_sta_service(json_or_current(s["ssid"], client_settings.service_ssid), json_or_current(s["password"], client_settings.service_password), mode);
       changed = true;
     }
     if (sta["customer_primary"].is<JsonObject>()) {
       JsonObject s = sta["customer_primary"].as<JsonObject>();
-      mgr->set_sta_customer_primary(json_string(s["ssid"]), json_string(s["password"]));
+      mgr->set_sta_customer_primary(json_or_current(s["ssid"], client_settings.customer_primary_ssid), json_or_current(s["password"], client_settings.customer_primary_password));
       changed = true;
     }
     if (sta["customer_secondary"].is<JsonObject>()) {
       JsonObject s = sta["customer_secondary"].as<JsonObject>();
-      mgr->set_sta_customer_secondary(json_string(s["ssid"]), json_string(s["password"]));
+      mgr->set_sta_customer_secondary(json_or_current(s["ssid"], client_settings.customer_secondary_ssid), json_or_current(s["password"], client_settings.customer_secondary_password));
       changed = true;
     }
   }
@@ -591,13 +600,13 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     JsonObject soft_ap = root["soft_ap"].as<JsonObject>();
     if (soft_ap["service_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["service_ap"].as<JsonObject>();
-      mgr->set_service_ap(json_string(s["password"]), s["mode"].isNull() ? 1 : s["mode"].as<uint8_t>());
+      mgr->set_service_ap(json_or_current(s["password"], ap_settings.service_ap_password), s["mode"].isNull() ? ap_settings.service_ap_mode : s["mode"].as<uint8_t>());
       changed = true;
     }
     if (soft_ap["region_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["region_ap"].as<JsonObject>();
-      uint8_t channel = s["channel"].isNull() ? 0 : s["channel"].as<uint8_t>();
-      mgr->set_region_ap(json_string(s["ssid"]), json_string(s["password"]), s["mode"].isNull() ? 0 : s["mode"].as<uint8_t>(), channel);
+      uint8_t channel = s["channel"].isNull() ? ap_settings.region_ap_channel : s["channel"].as<uint8_t>();
+      mgr->set_region_ap(json_or_current(s["ssid"], ap_settings.region_ap_ssid), json_or_current(s["password"], ap_settings.region_ap_password), s["mode"].isNull() ? ap_settings.region_ap_mode : s["mode"].as<uint8_t>(), channel);
       changed = true;
     }
   }
@@ -740,6 +749,32 @@ void ApiCoreV1::ping_region() {
 #ifdef USE_UDPSERVER
   if (udp_server::udpServer != nullptr)
     udp_server::udpServer->sendPingReq();
+#endif
+}
+
+void ApiCoreV1::handle_region_ping(JsonObject root, JsonObject response) {
+  this->ping_region();
+
+  response["ok"] = true;
+  response["sent"] = true;
+  if (!root["regionId"].isNull())
+    response["regionId"] = root["regionId"].as<std::string>();
+
+  JsonArray responses = response["responses"].to<JsonArray>();
+#ifdef USE_UDPSERVER
+  if (udp_server::udpServer != nullptr) {
+    const uint32_t now = millis();
+    for (auto *item : udp_server::udpServer->GlobalDevices.Items) {
+      if (item == nullptr)
+        continue;
+
+      JsonObject row = responses.add<JsonObject>();
+      item->toJson(row);
+      const uint32_t age = now >= item->last_update ? now - item->last_update : 0;
+      row["ageMs"] = age;
+      row["online"] = age < 300000;
+    }
+  }
 #endif
 }
 
