@@ -296,13 +296,29 @@ void add_error_status(JsonObject root) {
 
 }  // namespace
 
-void ApiCoreV1::build_info(JsonObject root) {
-  uint8_t mac[6];
-  get_mac_address_raw(mac);
+std::string ApiCoreV1::get_build_string_() const {
+  if (storage::store == nullptr)
+    return "";
 
   uint8_t build_hi = 0;
   uint8_t build_lo = 0;
   storage::store->getBuildNumber(build_hi, build_lo);
+  return str_sprintf("%u.%u", build_hi, build_lo);
+}
+
+std::string ApiCoreV1::get_firmware_version_() const {
+  if (!this->firmware_version_.empty())
+    return this->firmware_version_;
+
+  return this->get_build_string_();
+}
+
+void ApiCoreV1::build_info(JsonObject root) {
+  uint8_t mac[6];
+  get_mac_address_raw(mac);
+
+  const std::string build = this->get_build_string_();
+  const std::string firmware_version = this->get_firmware_version_();
 
   root["api"] = "g-node.v1";
   root["model"] = storage::store->get_model();
@@ -310,8 +326,14 @@ void ApiCoreV1::build_info(JsonObject root) {
   root["serial"] = storage::store->get_serial();
   root["mac"] = storage::convertMacToStr(mac);
   root["name"] = std::string("G-Smart-") + storage::store->get_serial();
-  root["fwVersion"] = str_sprintf("%u.%u", build_hi, build_lo);
-  root["build"] = str_sprintf("%u.%u", build_hi, build_lo);
+  root["fw"] = firmware_version;
+  root["fwver"] = firmware_version;
+  root["fwVersion"] = firmware_version;
+  root["build"] = build;
+
+  JsonObject firmware = root["firmware"].to<JsonObject>();
+  firmware["build"] = build;
+  firmware["version"] = firmware_version;
 
   add_wifi_runtime(root);
 
@@ -373,6 +395,9 @@ void ApiCoreV1::build_status(JsonObject root) {
 }
 
 void ApiCoreV1::build_diagnostics(JsonObject root) {
+  const std::string build = this->get_build_string_();
+  const std::string firmware_version = this->get_firmware_version_();
+
   root["model"] = storage::store->get_model();
   root["serial"] = storage::store->get_serial();
   root["uptimeSec"] = millis() / 1000;
@@ -388,20 +413,22 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
   memory["heapFragmentation"] = ESP.getHeapFragmentation();
 #endif
 
-  JsonObject firmware = root["firmware"].to<JsonObject>();
+  JsonObject diagnostics_firmware = root["firmware"].to<JsonObject>();
+  diagnostics_firmware["build"] = build;
+  diagnostics_firmware["version"] = firmware_version;
 #ifdef ESP32
-  firmware["platform"] = "esp32";
+  diagnostics_firmware["platform"] = "esp32";
 #elif defined(ESP8266)
-  firmware["platform"] = "esp8266";
+  diagnostics_firmware["platform"] = "esp8266";
 #else
-  firmware["platform"] = "unknown";
+  diagnostics_firmware["platform"] = "unknown";
 #endif
-  firmware["cpuFreqMhz"] = ESP.getCpuFreqMHz();
-  firmware["sketchSize"] = ESP.getSketchSize();
-  firmware["freeSketchSpace"] = ESP.getFreeSketchSpace();
-  firmware["sdkVersion"] = ESP.getSdkVersion();
-  firmware["flashChipSize"] = ESP.getFlashChipSize();
-  firmware["flashChipSpeed"] = ESP.getFlashChipSpeed();
+  diagnostics_firmware["cpuFreqMhz"] = ESP.getCpuFreqMHz();
+  diagnostics_firmware["sketchSize"] = ESP.getSketchSize();
+  diagnostics_firmware["freeSketchSpace"] = ESP.getFreeSketchSpace();
+  diagnostics_firmware["sdkVersion"] = ESP.getSdkVersion();
+  diagnostics_firmware["flashChipSize"] = ESP.getFlashChipSize();
+  diagnostics_firmware["flashChipSpeed"] = ESP.getFlashChipSpeed();
 
   JsonObject filesystem = root["filesystem"].to<JsonObject>();
 #ifdef GSMART_FEATURE_FILESYSTEM

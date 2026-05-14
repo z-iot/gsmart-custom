@@ -22,6 +22,7 @@ struct IdentifyRequest {
 class ApiCoreV1 : public Component {
  public:
   std::string get_version_path() const { return "v1"; }
+  void set_firmware_version(const std::string &firmware_version) { this->firmware_version_ = firmware_version; }
 
   // Info & Status
   void build_info(JsonObject root);
@@ -74,7 +75,11 @@ class ApiCoreV1 : public Component {
   CallbackManager<void(IdentifyRequest)> *get_identify_callback() { return &this->identify_callback_; }
 
  protected:
+  std::string get_build_string_() const;
+  std::string get_firmware_version_() const;
+
   CallbackManager<void(IdentifyRequest)> identify_callback_{};
+  std::string firmware_version_{};
 };
 
 class IdentifyTrigger : public Trigger<IdentifyRequest> {
