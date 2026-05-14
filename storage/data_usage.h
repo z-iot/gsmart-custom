@@ -202,6 +202,7 @@ namespace esphome
 
       void setup();
       void save();
+      void clear();
 
 #ifdef GSMART_EMITTER
       UsageBeam beam;

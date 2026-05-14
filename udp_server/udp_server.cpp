@@ -83,7 +83,6 @@ namespace esphome
       return current_region_id != 0 && region_id == current_region_id;
     }
 
-#ifdef GSMART_REX_UDP_MANAGEMENT
     bool UdpServer::targetMacMatches(const uint8_t target_mac[6]) const
     {
       uint8_t local_mac[6];
@@ -195,7 +194,6 @@ namespace esphome
         break;
       }
     }
-#endif
 
     void UdpServer::sendSysInfo()
     {
@@ -628,7 +626,6 @@ namespace esphome
           this->reconfig_callback_.call(*packetReconfig);
         }
         break;
-#ifdef GSMART_REX_UDP_MANAGEMENT
       case PacketKind::MANAGEMENT:
         if (packet.body.size() == sizeof(PacketManagement))
         {
@@ -637,7 +634,6 @@ namespace esphome
           this->applyManagementPacket(*packetManagement, main);
         }
         break;
-#endif
       default:
         ESP_LOGD(TAG, "Unknown packet kind %u.", static_cast<uint8_t>(packet.header.packetKind));
       }

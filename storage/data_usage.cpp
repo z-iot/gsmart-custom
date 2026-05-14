@@ -87,5 +87,45 @@ namespace esphome
 #endif
     }
 
+    void DataUsage::clear()
+    {
+#ifdef GSMART_EMITTER
+      const int8_t lamp_count = beam.pref.lampCount;
+      const int8_t fan_count = beam.pref.fanCount;
+      beam.pref = UsageBeamPref{};
+      beam.pref.lampCount = lamp_count;
+      beam.pref.fanCount = fan_count;
+      beam.lastStart = 0;
+      beam.lastStop = 0;
+
+      for (int i = 0; i < DEVICE_MAX_LAMP; i++)
+      {
+        const uint32_t last_exchange_date = lamp[i].pref.lastExchangeDate;
+        const uint32_t last_exchange_live_hour = lamp[i].pref.lastExchangeLiveHour;
+        const uint16_t power_watts = lamp[i].pref.powerWatts;
+        lamp[i].pref = UsageLampPref{};
+        lamp[i].pref.lastExchangeDate = last_exchange_date;
+        lamp[i].pref.lastExchangeLiveHour = last_exchange_live_hour;
+        lamp[i].pref.powerWatts = power_watts;
+        lamp[i].lastStart = 0;
+        lamp[i].lastStop = 0;
+      }
+
+      for (int i = 0; i < DEVICE_MAX_FAN; i++)
+        fan[i] = UsageFan{};
+
+      motion = UsageMotion{};
+#endif
+      error = UsageError{};
+      lastCheck = 0;
+      lastChange = 0;
+      lastStorage = 0;
+      motionOnSec = 0;
+      motionStartCount = 0;
+      this->save();
+      if (global_preferences != nullptr)
+        global_preferences->sync();
+    }
+
   }
 }

@@ -50,5 +50,15 @@ namespace esphome
 #endif
     }
 
+    void DataRegion::clear()
+    {
+#ifdef GSMART_FEATURE_REGION
+      this->layout = RegionLayout{};
+      this->metadata = RegionMetadata{};
+      this->selfIndex = -1;
+      this->save();
+#endif
+    }
+
   }
 }

@@ -147,6 +147,7 @@ namespace esphome
       void setup();
       void save();
       void saveMetadata();
+      void clear();
 
       RegionLayout layout;
       RegionMetadata metadata;

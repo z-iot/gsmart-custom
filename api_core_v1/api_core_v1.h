@@ -56,6 +56,11 @@ class ApiCoreV1 : public Component {
   // Control
   bool handle_control_mode(JsonObject root, JsonObject response);
   void handle_identify(JsonObject root, JsonObject response);
+  void handle_restart(JsonObject root, JsonObject response);
+  void handle_factory_reset(JsonObject root, JsonObject response);
+  void handle_service_ap(JsonObject root, JsonObject response);
+  void handle_clear_region(JsonObject root, JsonObject response);
+  void handle_clear_usage(JsonObject root, JsonObject response);
   bool handle_api_config(JsonObject root, JsonObject response);
   bool handle_api_manual_control(JsonObject root, JsonObject response);
 

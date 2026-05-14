@@ -81,6 +81,18 @@ namespace esphome
 #endif
     }
 
+    bool FileSystem::clearAll()
+    {
+      if (!ready) return false;
+#ifdef ESP32
+      return esp_littlefs_format("spiffs") == ESP_OK;
+#elif defined(ESP8266)
+      return LittleFS.format();
+#else
+      return false;
+#endif
+    }
+
     void FileSystem::listAllFiles()
     {
       if (!ready) return;

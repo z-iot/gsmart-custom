@@ -18,7 +18,6 @@ class ApiAdapterMqtt : public Component {
   void subscribe_topics_();
   void on_message_(const std::string &topic, const std::string &payload);
   void publish_response_(const std::string &suffix, JsonVariant rid, std::function<void(JsonObject)> builder);
-  void publish_empty_response_(const std::string &suffix, JsonVariant rid);
 
   api_core_v1::ApiCoreV1 *core_;
   std::string base_topic_;

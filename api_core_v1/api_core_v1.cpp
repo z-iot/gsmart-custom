@@ -1,6 +1,7 @@
 #include "api_core_v1.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esphome/core/preferences.h"
 
 #include "payloads.h"
 #include "esphome/components/storage/store.h"
@@ -124,6 +125,17 @@ std::string json_string(JsonVariant value, const std::string &fallback = "") {
   if (value.isNull())
     return fallback;
   return value.as<std::string>();
+}
+
+bool require_confirmation(JsonObject root, JsonObject response, const char *expected) {
+  if (json_string(root["confirm"]) == expected)
+    return true;
+
+  response["ok"] = false;
+  response["error"] = "confirmation_required";
+  response["message"] = std::string("Missing required confirmation token: ") + expected;
+  response["requiredConfirm"] = expected;
+  return false;
 }
 
 void add_wifi_runtime(JsonObject root) {
@@ -293,8 +305,6 @@ void ApiCoreV1::build_info(JsonObject root) {
   storage::store->getBuildNumber(build_hi, build_lo);
 
   root["api"] = "g-node.v1";
-  JsonArray aliases = root["apiAliases"].to<JsonArray>();
-  aliases.add("mobile.v1");
   root["model"] = storage::store->get_model();
   root["modelNum"] = storage::store->get_model_num();
   root["serial"] = storage::store->get_serial();
@@ -307,11 +317,7 @@ void ApiCoreV1::build_info(JsonObject root) {
 
   JsonObject capabilities = root["capabilities"].to<JsonObject>();
   capabilities["control"] = true;
-#ifdef GSMART_REX_BASIC_REST
-  capabilities["diagnostics"] = false;
-#else
   capabilities["diagnostics"] = true;
-#endif
 #ifdef GSMART_FEATURE_SCHEDULE
   capabilities["scheduler"] = true;
 #else
@@ -929,6 +935,132 @@ void ApiCoreV1::handle_identify(JsonObject root, JsonObject response) {
   response["sound"] = identify.sound;
   response["soundEnabled"] = identify.sound_enabled;
   response["light"] = identify.light;
+}
+
+void ApiCoreV1::handle_restart(JsonObject root, JsonObject response) {
+  (void) root;
+  static constexpr uint32_t RESTART_DELAY_MS = 500;
+  this->set_timeout("api_control_restart", RESTART_DELAY_MS, []() { App.safe_reboot(); });
+
+  response["ok"] = true;
+  response["rebootScheduled"] = true;
+  response["delayMs"] = RESTART_DELAY_MS;
+}
+
+void ApiCoreV1::handle_factory_reset(JsonObject root, JsonObject response) {
+  if (!require_confirmation(root, response, "FACTORY_RESET"))
+    return;
+
+  bool filesystem_cleared = false;
+#ifdef GSMART_FEATURE_FILESYSTEM
+  if (storage::store != nullptr && storage::store->file_system_ != nullptr)
+    filesystem_cleared = storage::store->file_system_->clearAll();
+#endif
+
+  const bool preferences_cleared = global_preferences != nullptr && global_preferences->reset();
+
+  static constexpr uint32_t RESTART_DELAY_MS = 750;
+  this->set_timeout("api_control_factory_reset", RESTART_DELAY_MS, []() { App.safe_reboot(); });
+
+  response["ok"] = true;
+  response["factoryReset"] = true;
+  response["preferencesCleared"] = preferences_cleared;
+  response["filesystemCleared"] = filesystem_cleared;
+  response["rebootScheduled"] = true;
+  response["delayMs"] = RESTART_DELAY_MS;
+}
+
+void ApiCoreV1::handle_service_ap(JsonObject root, JsonObject response) {
+  auto *mgr = gsmart_wifi_manager::global_gsmart_wifi_manager;
+  if (mgr == nullptr) {
+    response["ok"] = false;
+    response["error"] = "wifi_manager_not_available";
+    response["message"] = "GSmart Wi-Fi manager is not enabled in this firmware.";
+    return;
+  }
+
+  if (root["enabled"].isNull()) {
+    response["ok"] = false;
+    response["error"] = "missing_enabled";
+    response["message"] = "Missing required field: enabled.";
+    return;
+  }
+
+  const bool enabled = json_bool(root["enabled"], false);
+  uint32_t duration_sec = 0;
+  if (!root["durationSec"].isNull()) {
+    const int32_t requested = root["durationSec"].as<int32_t>();
+    duration_sec = requested > 0 ? static_cast<uint32_t>(requested) : 0;
+  }
+
+  this->cancel_timeout("service_ap_auto_off");
+  if (enabled) {
+    mgr->set_service_ap(json_string(root["password"]), 1);
+    if (duration_sec > 0) {
+      const uint32_t delay_ms = duration_sec > 4294967UL ? 4294967295UL : duration_sec * 1000UL;
+      this->set_timeout("service_ap_auto_off", delay_ms, []() {
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", 0);
+      });
+    }
+  } else {
+    mgr->set_service_ap("", 0);
+  }
+
+  response["ok"] = true;
+  response["enabled"] = enabled;
+  response["durationSec"] = duration_sec;
+  response["permanent"] = enabled && duration_sec == 0;
+  response["autoOffScheduled"] = enabled && duration_sec > 0;
+}
+
+void ApiCoreV1::handle_clear_region(JsonObject root, JsonObject response) {
+  if (!require_confirmation(root, response, "CLEAR_REGION"))
+    return;
+
+#ifdef GSMART_FEATURE_REGION
+  if (storage::store == nullptr || storage::store->region == nullptr) {
+    response["ok"] = false;
+    response["error"] = "region_not_ready";
+    return;
+  }
+
+  storage::store->region->clear();
+#ifdef USE_UDPSERVER
+  if (udp_server::udpServer != nullptr)
+    udp_server::udpServer->changeChannel(0);
+#endif
+
+  response["ok"] = true;
+  response["cleared"] = true;
+  response["wifiPreserved"] = true;
+#else
+  response["ok"] = false;
+  response["error"] = "region_not_available";
+  response["message"] = "Region feature is not enabled in this firmware.";
+#endif
+}
+
+void ApiCoreV1::handle_clear_usage(JsonObject root, JsonObject response) {
+  if (!require_confirmation(root, response, "CLEAR_USAGE"))
+    return;
+
+#ifdef GSMART_FEATURE_USAGE
+  if (storage::store == nullptr || storage::store->usage == nullptr) {
+    response["ok"] = false;
+    response["error"] = "usage_not_ready";
+    return;
+  }
+
+  storage::store->usage->clear();
+  response["ok"] = true;
+  response["cleared"] = true;
+  response["factoryReset"] = false;
+#else
+  response["ok"] = false;
+  response["error"] = "usage_not_available";
+  response["message"] = "Usage feature is not enabled in this firmware.";
+#endif
 }
 
 bool ApiCoreV1::handle_api_config(JsonObject root, JsonObject response) {

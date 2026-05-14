@@ -40,6 +40,7 @@ namespace esphome
       // Utility operations
       bool exists(const char *filePath);
       bool remove(const char *filePath);
+      bool clearAll();
       void listAllFiles();
       
       // Helper for UI/Payloader
