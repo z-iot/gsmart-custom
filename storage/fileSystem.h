@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef GSMART_FEATURE_FILESYSTEM
+
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/components/json/json_util.h"
@@ -170,3 +172,5 @@ namespace esphome
     }
   }
 }
+
+#endif  // GSMART_FEATURE_FILESYSTEM

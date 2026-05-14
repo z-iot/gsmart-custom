@@ -1,6 +1,8 @@
 #pragma once
 
+#ifdef GSMART_FEATURE_FILESYSTEM
 #include "fileSystem.h"
+#endif
 
 namespace esphome
 {
@@ -33,6 +35,7 @@ namespace esphome
 
       bool loadFromFile()
       {
+#ifdef GSMART_FEATURE_FILESYSTEM
         if (fileSystem == nullptr) {
            ESP_LOGE("storage", "FileSystem not initialized, cannot load %s", fileName.c_str());
            return false;
@@ -43,10 +46,14 @@ namespace esphome
         auto root = doc.as<JsonObject>();
         fromJson(root);
         return true;
+#else
+        return false;
+#endif
       }
 
       bool saveToFile()
       {
+#ifdef GSMART_FEATURE_FILESYSTEM
         if (fileSystem == nullptr) {
            ESP_LOGE("storage", "FileSystem not initialized, cannot save %s", fileName.c_str());
            return false;
@@ -55,6 +62,9 @@ namespace esphome
         auto root = jsonDocument.to<JsonObject>();
         toJson(root);
         return fileSystem->writeToFS(fileName.c_str(), root);
+#else
+        return false;
+#endif
       }
 
       virtual void toJson(JsonObject &root)

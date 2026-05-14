@@ -32,6 +32,8 @@ namespace esphome
         return "IDENTITY";
       case PacketKind::RECONFIG:
         return "RECONFIG";
+      case PacketKind::MANAGEMENT:
+        return "MANAGEMENT";
       default:
         return "--unknown--";
       }

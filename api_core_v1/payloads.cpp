@@ -1,7 +1,9 @@
 #include "payloads.h"
 
 #include "esphome/components/storage/store.h"
+#ifdef GSMART_FEATURE_SCHEDULE
 #include "esphome/components/storage/settings_schedule.h"
+#endif
 #include "esphome/core/helpers.h"
 
 namespace esphome {
@@ -29,18 +31,25 @@ void system_info_json(JsonObject root) {
   root["flash_chip_size"] = ESP.getFlashChipSize();
   root["flash_chip_speed"] = ESP.getFlashChipSpeed();
 
+  JsonObject process = root["process"].to<JsonObject>();
+#ifdef GSMART_FEATURE_FILESYSTEM
   root["fs_total"] = esphome::storage::store->file_system_->GetTotalBytes();
   root["fs_used"] = esphome::storage::store->file_system_->GetUsedBytes();
 
-  // TODO vyhodit
   JsonObject dir = root["root_dir"].to<JsonObject>();
   esphome::storage::store->file_system_->listDir(dir);
+#else
+  root["fs_total"] = 0;
+  root["fs_used"] = 0;
+#endif
 
+#ifdef GSMART_FEATURE_SCHEDULE
   JsonObject schedule = root["schedule"].to<JsonObject>();
   esphome::storage::store->schedule->toJson(schedule);
-
-  JsonObject process = root["process"].to<JsonObject>();
   process["schedule_enabled"] = esphome::storage::store->schedule->enabled;
+#else
+  process["schedule_enabled"] = false;
+#endif
 #ifdef GSMART_FEATURE_REGION
   process["isRegionActive"] = esphome::storage::store->region->isRegionActive();
   process["isMaster"] = esphome::storage::store->region->isMaster();
@@ -56,7 +65,11 @@ void system_info_json(JsonObject root) {
       esphome::storage::store->global->radiation.activeMode);
 
   JsonObject usage = root["usage"].to<JsonObject>();
+#ifdef GSMART_FEATURE_USAGE
   esphome::storage::store->usage->fillAdvertise(usage);
+#else
+  usage["enabled"] = false;
+#endif
 }
 
 void neighborhood_json(JsonObject root) {
@@ -80,12 +93,16 @@ void neighborhood_json(JsonObject root) {
   root["flash_chip_size"] = ESP.getFlashChipSize();
   root["flash_chip_speed"] = ESP.getFlashChipSpeed();
 
+#ifdef GSMART_FEATURE_FILESYSTEM
   root["fs_total"] = esphome::storage::store->file_system_->GetTotalBytes();
   root["fs_used"] = esphome::storage::store->file_system_->GetUsedBytes();
 
-  // TODO vyhodit
   JsonObject dir = root["root_dir"].to<JsonObject>();
   esphome::storage::store->file_system_->listDir(dir);
+#else
+  root["fs_total"] = 0;
+  root["fs_used"] = 0;
+#endif
 }
 
 void features_json(JsonObject root) {
@@ -93,9 +110,19 @@ void features_json(JsonObject root) {
   root["Serial"] = esphome::storage::store->get_serial();
 }
 
-void scheduller_json(JsonObject root) { esphome::storage::store->schedule->toJson(root); }
+void scheduller_json(JsonObject root) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  esphome::storage::store->schedule->toJson(root);
+#else
+  root["enabled"] = false;
+#endif
+}
 
-void scheduller_apply(JsonObject root) { esphome::storage::store->schedule->reloadFromJson(root); }
+void scheduller_apply(JsonObject root) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  esphome::storage::store->schedule->reloadFromJson(root);
+#endif
+}
 
 void neighbor_apply(JsonObject root) {
   // TODO: napojit na storage->region->reloadFromJson(...) ked bude UI ulozene.

@@ -1,5 +1,7 @@
 #include "fileSystem.h"
 
+#ifdef GSMART_FEATURE_FILESYSTEM
+
 #ifdef ESP32
 #include <esp32-hal.h>
 #include <errno.h>
@@ -11,6 +13,7 @@ extern "C" int __attribute__((weak)) rmdir(const char *path) {
   errno = ENOSYS;
   return -1;
 }
+
 #endif
 
 namespace esphome
@@ -129,3 +132,5 @@ namespace esphome
     }
   }
 }
+
+#endif  // GSMART_FEATURE_FILESYSTEM

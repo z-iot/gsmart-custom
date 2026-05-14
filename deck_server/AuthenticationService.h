@@ -6,8 +6,8 @@
 
 #include "SecurityManager.h"
 
-#define VERIFY_AUTHORIZATION_PATH "/api/mobile/v1/me"
-#define SIGN_IN_PATH "/api/mobile/v1/signin"
+#define VERIFY_AUTHORIZATION_PATH "/api/g-node/v1/me"
+#define SIGN_IN_PATH "/api/g-node/v1/signin"
 #define LEGACY_VERIFY_AUTHORIZATION_PATH "/sec/me"
 #define LEGACY_SIGN_IN_PATH "/sec/signin"
 

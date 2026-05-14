@@ -126,6 +126,11 @@ namespace esphome
       void sendMessage(bool main, PacketKind kind, const uint8_t *bodyData, uint16_t bodyLen);
       uint64_t currentRegionId() const;
       bool packetRegionAllowed(uint64_t region_id) const;
+#ifdef GSMART_REX_UDP_MANAGEMENT
+      bool managementPacketAllowed(const PacketManagement &packet, bool main) const;
+      bool targetMacMatches(const uint8_t target_mac[6]) const;
+      void applyManagementPacket(const PacketManagement &packet, bool main);
+#endif
 
       IPAddress getIp(bool main);
       uint16_t getPort(bool main);

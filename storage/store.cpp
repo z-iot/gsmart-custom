@@ -4,7 +4,9 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
+#ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
+#endif
 // #include "esphome/core/entity_base.h"
 // #include "esphome/core/util.h"
 // #include "esphome/components/json/json_util.h"
@@ -28,11 +30,15 @@ namespace esphome
       store = this;
       ESP_LOGCONFIG(TAG, "Contructing Store...");
 
+#ifdef GSMART_FEATURE_FILESYSTEM
       file_system_ = new FileSystem();
-      ESP_LOGE(TAG, "FileSystem object created");
+      ESP_LOGCONFIG(TAG, "FileSystem object created");
+#endif
 
+#ifdef GSMART_FEATURE_SCHEDULE
       schedule = new SettingsSchedule();
-      ESP_LOGE(TAG, "Schedule object created");
+      ESP_LOGCONFIG(TAG, "Schedule object created");
+#endif
 
       ESP_LOGCONFIG(TAG, "Contructing Store... done");
     };
@@ -46,19 +52,20 @@ namespace esphome
       ESP_LOGE(TAG, "--- STORE SETUP START ---");
       ESP_LOGCONFIG(TAG, "Setting up Store...");
 
+#ifdef GSMART_FEATURE_FILESYSTEM
       if (file_system_ != nullptr) {
-        ESP_LOGE(TAG, "Calling file_system_->setup()...");
+        ESP_LOGCONFIG(TAG, "Calling file_system_->setup()...");
         file_system_->setup();
-        ESP_LOGE(TAG, "FileSystem ready: %s", file_system_->isReady() ? "YES" : "NO");
-      } else {
-        ESP_LOGE(TAG, "CRITICAL: file_system_ is NULL!");
+        ESP_LOGCONFIG(TAG, "FileSystem ready: %s", file_system_->isReady() ? "YES" : "NO");
       }
+#endif
 
 #ifdef GSMART_FEATURE_REGION
       region->setup();
       ESP_LOGCONFIG(TAG, "region member count: %d", region->layout.memberCount);
 #endif
 
+#ifdef GSMART_FEATURE_SCHEDULE
       if (schedule != nullptr) {
         if (schedule->loadFromFile()) {
           ESP_LOGI(TAG, "Schedule loaded successfully (%d items)", schedule->schedule.size());
@@ -68,10 +75,12 @@ namespace esphome
       } else {
         ESP_LOGE(TAG, "CRITICAL: schedule is NULL!");
       }
+#endif
 #ifdef GSMART_FEATURE_USAGE
       usage->setup();
 #endif
 
+#ifdef GSMART_FEATURE_FILESYSTEM
       if (settingsMode != nullptr) {
         if (settingsMode->loadFromFile()) {
           ESP_LOGI(TAG, "Mode settings loaded successfully");
@@ -87,6 +96,7 @@ namespace esphome
           ESP_LOGW(TAG, "No device settings file found or failed to load, using defaults");
         }
       }
+#endif
 
       // Dynamic naming logic
       std::string serial = str_lower_case(this->get_serial());

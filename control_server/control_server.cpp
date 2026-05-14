@@ -86,8 +86,8 @@ void ControlServer::setup() {
       });
 
   // Legacy gsmart-deck REST endpoints. The actual JSON building / storage
-  // wiring lives in core::payloads so a future mobile_api can reuse
-  // the same helpers under a clean /api/mobile/v1/* contract.
+  // wiring lives in core::payloads so the G-Node REST adapter can reuse
+  // the same helpers under the /api/g-node/v1/* contract.
   register_json_get(server, "/inf/system", &core::payloads::system_info_json);
   register_json_get(server, "/inf/neighborhood", &core::payloads::neighborhood_json);
   register_json_get(server, "/rest/features", &core::payloads::features_json);

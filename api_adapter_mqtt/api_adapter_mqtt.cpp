@@ -47,28 +47,52 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
     } else if (sub_topic == "status/get") {
       this->publish_response_("status/state", rid, [this](JsonObject res) { this->core_->build_status(res); });
     } else if (sub_topic == "diagnostics/get") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("diagnostics/state", rid);
+#else
       this->publish_response_("diagnostics/state", rid, [this](JsonObject res) { this->core_->build_diagnostics(res); });
+#endif
     } else if (sub_topic == "consumption/get") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("consumption/state", rid);
+#else
       this->publish_response_("consumption/state", rid, [this](JsonObject res) { this->core_->build_consumption(res); });
+#endif
     } else if (sub_topic == "control/mode/set") {
       this->publish_response_("control/mode/res", rid, [this, root](JsonObject res) { this->core_->handle_control_mode(root, res); });
     } else if (sub_topic == "control/identify/set") {
       this->publish_response_("control/identify/res", rid, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });
     } else if (sub_topic == "scheduler/get") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("scheduler/state", rid);
+#else
       this->publish_response_("scheduler/state", rid, [this](JsonObject res) { this->core_->build_scheduler(res); });
+#endif
     } else if (sub_topic == "scheduler/set") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("scheduler/res", rid);
+#else
       bool ok = this->core_->apply_scheduler(root);
       this->publish_response_("scheduler/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+#endif
     } else if (sub_topic == "scheduler/state/set") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("scheduler/state/res", rid);
+#else
       bool ok = this->core_->apply_scheduler_state(root);
       this->publish_response_("scheduler/state/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
+#endif
     } else if (sub_topic == "network/get") {
       this->publish_response_("network/state", rid, [this](JsonObject res) { this->core_->build_network(res); });
     } else if (sub_topic == "network/set") {
       bool ok = this->core_->apply_network(root);
       this->publish_response_("network/res", rid, [ok](JsonObject res) { res["ok"] = ok; });
     } else if (sub_topic == "network/scan") {
+#ifdef GSMART_REX_BASIC_REST
+      this->publish_empty_response_("network/scan/state", rid);
+#else
       this->publish_response_("network/scan/state", rid, [this](JsonObject res) { this->core_->build_network_scan(res); });
+#endif
     } else if (sub_topic == "network/mqtt/get") {
       this->publish_response_("network/mqtt/state", rid, [this](JsonObject res) { this->core_->build_mqtt(res); });
     } else if (sub_topic == "region/get") {
@@ -97,6 +121,10 @@ void ApiAdapterMqtt::publish_response_(const std::string &suffix, JsonVariant ri
   std::string payload;
   serializeJson(doc, payload);
   mqtt::global_mqtt_client->publish(full_topic, payload);
+}
+
+void ApiAdapterMqtt::publish_empty_response_(const std::string &suffix, JsonVariant rid) {
+  this->publish_response_(suffix, rid, [](JsonObject root) {});
 }
 
 }  // namespace api_adapter_mqtt

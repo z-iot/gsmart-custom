@@ -14,6 +14,7 @@ CONF_MODEL = "model"
 CONF_ON_SITUATION_CHANGE = "on_situation_change"
 CONF_ON_SITUATION_DURATION_CHANGE = "on_situation_duration_change"
 CONF_ON_CHANGE_RADIATION_MODE = "on_change_radiation_mode"
+CONF_FILESYSTEM = "filesystem"
 
 storage_ns = cg.esphome_ns.namespace("storage")
 RadiationMode = storage_ns.enum("RadiationMode")
@@ -28,6 +29,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Store),
             cv.Required(CONF_MODEL): cv.string,
+            cv.Optional(CONF_FILESYSTEM, default=False): cv.boolean,
             cv.Optional(CONF_ON_SITUATION_CHANGE): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(SituationChangeTrigger),
@@ -51,7 +53,10 @@ CONFIG_SCHEMA = cv.All(
 
 @coroutine_with_priority(64.0)
 async def to_code(config):
-    if CORE.using_arduino:
+    if config[CONF_FILESYSTEM]:
+        cg.add_define("GSMART_FEATURE_FILESYSTEM")
+
+    if config[CONF_FILESYSTEM] and CORE.using_arduino:
         if CORE.is_esp32:
             cg.add_library("FS", None)
             cg.add_library("SPIFFS", None)

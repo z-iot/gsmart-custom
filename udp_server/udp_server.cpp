@@ -6,6 +6,7 @@
 #include "udp_server.h"
 #include "esphome/core/log.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/application.h"
 #include "esphome/components/wifi/wifi_component.h"
 
 #ifdef ESP32
@@ -31,6 +32,10 @@
 
 #ifdef USE_STORAGE
 #include "esphome/components/storage/store.h"
+#endif
+
+#ifdef USE_GSMART_WIFI_MANAGER
+#include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
 #endif
 
 namespace esphome
@@ -77,6 +82,120 @@ namespace esphome
       const uint64_t current_region_id = this->currentRegionId();
       return current_region_id != 0 && region_id == current_region_id;
     }
+
+#ifdef GSMART_REX_UDP_MANAGEMENT
+    bool UdpServer::targetMacMatches(const uint8_t target_mac[6]) const
+    {
+      uint8_t local_mac[6];
+      get_mac_address_raw(local_mac);
+      return memcmp(target_mac, local_mac, sizeof(local_mac)) == 0;
+    }
+
+    bool UdpServer::managementPacketAllowed(const PacketManagement &packet, bool main) const
+    {
+      if (!this->targetMacMatches(packet.target_mac))
+        return false;
+
+      const uint64_t current_region_id = this->currentRegionId();
+      if (current_region_id != 0 && packet.region_id == current_region_id)
+        return true;
+
+      // Factory/service rescue path: targeted management on the main multicast can
+      // bootstrap an unassigned REX or move it to a new region without MQTT.
+      return main && packet.region_id == 0;
+    }
+
+    void UdpServer::applyManagementPacket(const PacketManagement &packet, bool main)
+    {
+      if (!this->managementPacketAllowed(packet, main))
+      {
+        ESP_LOGD(TAG, "Ignoring management packet for another device or region.");
+        return;
+      }
+
+      const char *ssid = packet.ssid;
+      const char *password = packet.password;
+
+      switch (packet.action)
+      {
+      case ManagementAction::SET_REGION:
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+        if (storage::store != nullptr && storage::store->region != nullptr)
+        {
+          if (packet.new_region_id != 0)
+            storage::store->region->layout.serial = packet.new_region_id;
+          if (packet.udp_channel != 0)
+            storage::store->region->metadata.udpChannel = packet.udp_channel;
+          if (packet.region_name[0] != 0)
+          {
+            strncpy(storage::store->region->metadata.name, packet.region_name,
+                    sizeof(storage::store->region->metadata.name) - 1);
+            storage::store->region->metadata.name[sizeof(storage::store->region->metadata.name) - 1] = 0;
+          }
+          storage::store->region->recalculateLayout();
+          storage::store->region->save();
+          if (storage::store->region->metadata.udpChannel != 0)
+            this->changeChannel(storage::store->region->metadata.udpChannel);
+          ESP_LOGI(TAG, "Management SET_REGION applied: %s channel %u",
+                   storage::convertRegionSerialtoStr(storage::store->region->layout.serial).c_str(),
+                   storage::store->region->metadata.udpChannel);
+        }
+#endif
+        break;
+      case ManagementAction::SET_WIFI_PRIMARY:
+#ifdef USE_GSMART_WIFI_MANAGER
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+        {
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_sta_customer_primary(ssid, password);
+          if (packet.sta_mode <= 3)
+            gsmart_wifi_manager::global_gsmart_wifi_manager->set_sta_mode(packet.sta_mode);
+          ESP_LOGI(TAG, "Management SET_WIFI_PRIMARY applied.");
+        }
+#endif
+        break;
+      case ManagementAction::SET_WIFI_SECONDARY:
+#ifdef USE_GSMART_WIFI_MANAGER
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+        {
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_sta_customer_secondary(ssid, password);
+          if (packet.sta_mode <= 3)
+            gsmart_wifi_manager::global_gsmart_wifi_manager->set_sta_mode(packet.sta_mode);
+          ESP_LOGI(TAG, "Management SET_WIFI_SECONDARY applied.");
+        }
+#endif
+        break;
+      case ManagementAction::SET_REGION_AP:
+#ifdef USE_GSMART_WIFI_MANAGER
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+        {
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_region_ap(ssid, password, packet.ap_mode, packet.ap_channel);
+          ESP_LOGI(TAG, "Management SET_REGION_AP applied.");
+        }
+#endif
+        break;
+      case ManagementAction::OPEN_SERVICE_AP:
+#ifdef USE_GSMART_WIFI_MANAGER
+        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
+        {
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", 1);
+          ESP_LOGI(TAG, "Management OPEN_SERVICE_AP applied.");
+        }
+#endif
+        break;
+      case ManagementAction::PING:
+        this->sendPingRes();
+        break;
+      case ManagementAction::REBOOT:
+        ESP_LOGI(TAG, "Management REBOOT requested.");
+        this->set_timeout("management_reboot", 500, []() { App.safe_reboot(); });
+        break;
+      case ManagementAction::NONE:
+      default:
+        ESP_LOGD(TAG, "Ignoring empty management action.");
+        break;
+      }
+    }
+#endif
 
     void UdpServer::sendSysInfo()
     {
@@ -509,6 +628,16 @@ namespace esphome
           this->reconfig_callback_.call(*packetReconfig);
         }
         break;
+#ifdef GSMART_REX_UDP_MANAGEMENT
+      case PacketKind::MANAGEMENT:
+        if (packet.body.size() == sizeof(PacketManagement))
+        {
+          auto *data = packet.body.data();
+          PacketManagement *packetManagement = reinterpret_cast<PacketManagement *>(data);
+          this->applyManagementPacket(*packetManagement, main);
+        }
+        break;
+#endif
       default:
         ESP_LOGD(TAG, "Unknown packet kind %u.", static_cast<uint8_t>(packet.header.packetKind));
       }

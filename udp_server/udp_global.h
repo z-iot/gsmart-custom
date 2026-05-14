@@ -46,6 +46,7 @@ namespace esphome
       STATUS = 52,
       IDENTITY = 53,
       RECONFIG = 54,
+      MANAGEMENT = 55,
     };
 
     std::string packetKindToStr(PacketKind item);
@@ -177,6 +178,34 @@ namespace esphome
     {
       uint8_t mac[6];
       uint64_t region_id;
+    };
+
+    enum class ManagementAction : uint8_t
+    {
+      NONE = 0,
+      SET_REGION = 1,
+      SET_WIFI_PRIMARY = 2,
+      SET_WIFI_SECONDARY = 3,
+      SET_REGION_AP = 4,
+      REBOOT = 5,
+      OPEN_SERVICE_AP = 6,
+      PING = 7,
+    };
+
+    struct PacketManagement
+    {
+      uint8_t target_mac[6];
+      uint8_t sender_mac[6];
+      uint64_t region_id;
+      ManagementAction action;
+      uint16_t udp_channel;
+      uint64_t new_region_id;
+      uint8_t sta_mode;
+      uint8_t ap_mode;
+      uint8_t ap_channel;
+      char ssid[33];
+      char password[65];
+      char region_name[48];
     };
 
     struct PacketPing

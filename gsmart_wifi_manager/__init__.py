@@ -16,6 +16,7 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     wifi.request_wifi_scan_results()
     wifi.request_wifi_scan_results_listener()
+    cg.add_define("USE_GSMART_WIFI_MANAGER")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

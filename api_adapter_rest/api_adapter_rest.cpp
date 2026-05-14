@@ -22,9 +22,14 @@ void send_ok(AsyncWebServerRequest *request, std::function<void(JsonObject)> ext
       extra(root);
   });
 }
+
+void send_empty_json(AsyncWebServerRequest *request) {
+  send_json(request, [](JsonObject root) {});
+}
 }  // namespace
 
 void ApiAdapterRest::setup() {
+  this->base_->init();
   std::shared_ptr<AsyncWebServer> server(this->base_->get_server(), [](AsyncWebServer *) {});
   if (!server) {
     ESP_LOGE("api_adapter_rest", "Web server not initialized, skipping REST API setup");
@@ -42,6 +47,13 @@ void ApiAdapterRest::setup() {
       send_json(request, [this](JsonObject root) { this->core_->build_status(root); });
     });
 
+#ifdef GSMART_REX_BASIC_REST
+    web_server_base::on(server, (base_path + "/diagnostics").c_str(), HTTP_GET,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+
+    web_server_base::on(server, (base_path + "/consumption").c_str(), HTTP_GET,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+#else
     // GET Diagnostics
     web_server_base::on(server, (base_path + "/diagnostics").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_diagnostics(root); });
@@ -51,6 +63,7 @@ void ApiAdapterRest::setup() {
     web_server_base::on(server, (base_path + "/consumption").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_consumption(root); });
     });
+#endif
 
     // Network
     web_server_base::on(server, (base_path + "/network").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -60,9 +73,14 @@ void ApiAdapterRest::setup() {
       bool applied = this->core_->apply_network(root);
       send_ok(request, [applied](JsonObject res) { res["applied"] = applied; });
     });
+#ifdef GSMART_REX_BASIC_REST
+    web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+#else
     web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject res) { this->core_->build_network_scan(res); });
     });
+#endif
     web_server_base::on(server, (base_path + "/network/mqtt").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_mqtt(root); });
     });
@@ -75,6 +93,14 @@ void ApiAdapterRest::setup() {
       send_json(request, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });
     });
 
+#ifdef GSMART_REX_BASIC_REST
+    web_server_base::on(server, (base_path + "/scheduler").c_str(), HTTP_GET,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+    web_server_base::on_post_json(server, (base_path + "/scheduler").c_str(),
+                                  [](AsyncWebServerRequest *request, JsonObject root) { send_empty_json(request); });
+    web_server_base::on_post_json(server, (base_path + "/scheduler/state").c_str(),
+                                  [](AsyncWebServerRequest *request, JsonObject root) { send_empty_json(request); });
+#else
     // Scheduler
     web_server_base::on(server, (base_path + "/scheduler").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_scheduler(root); });
@@ -87,6 +113,7 @@ void ApiAdapterRest::setup() {
       bool ok = this->core_->apply_scheduler_state(root);
       send_ok(request, [ok](JsonObject res) { res["saved"] = ok; });
     });
+#endif
 
     // Region
     web_server_base::on(server, (base_path + "/region").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -103,6 +130,17 @@ void ApiAdapterRest::setup() {
       send_json(request, [this, root](JsonObject res) { this->core_->handle_region_ping(root, res); });
     });
 
+#ifdef GSMART_REX_BASIC_REST
+    web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+    web_server_base::on_post_json(server, (base_path + "/settings/consumables").c_str(),
+                                  [](AsyncWebServerRequest *request, JsonObject root) { send_empty_json(request); });
+
+    web_server_base::on(server, (base_path + "/settings/modes").c_str(), HTTP_GET,
+                        [](AsyncWebServerRequest *request) { send_empty_json(request); });
+    web_server_base::on_post_json(server, (base_path + "/settings/modes").c_str(),
+                                  [](AsyncWebServerRequest *request, JsonObject root) { send_empty_json(request); });
+#else
     // Settings: Consumables (lamp hours, power, etc.)
     web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_settings_consumables(root); });
@@ -120,12 +158,13 @@ void ApiAdapterRest::setup() {
       bool saved = this->core_->apply_settings_modes(root);
       send_ok(request, [saved](JsonObject res) { res["saved"] = saved; });
     });
+#endif
   };
 
   register_routes("/api/g-node/" + this->core_->get_version_path());
-  register_routes("/api/mobile/" + this->core_->get_version_path());
 
-  // Aliases (for backward compatibility)
+  // Legacy aliases kept temporarily for existing tools while the app migrates
+  // to /api/g-node/v1.
   web_server_base::on(server, "/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
     send_json(request, [this](JsonObject root) { this->core_->build_status(root); });
   });

@@ -6,7 +6,9 @@
 #include "esphome/core/controller.h"
 #include <vector>
 #include "esphome/core/helpers.h"
+#ifdef GSMART_FEATURE_SCHEDULE
 #include "settings_schedule.h"
+#endif
 
 #ifdef GSMART_FEATURE_FILESYSTEM
 #include "fileSystem.h"
@@ -16,16 +18,16 @@
 #include "data_usage.h"
 #include "data_region.h"
 #include "global.h"
+#ifdef GSMART_FEATURE_FILESYSTEM
 #include "settings_mode.h"
 #include "settings_device.h"
-#include <esphome/components/logger/logger.h>
-#ifdef GSMART_FEATURE_FILESYSTEM
-#include "fileSystem.h"
 #endif
+#include <esphome/components/logger/logger.h>
 
 #include "esphome/components/wifi/wifi_component.h"
+#ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_component.h"
-#include "esphome/components/wifi/wifi_component.h"
+#endif
 #ifdef USE_ESP32
 #include <esp_wifi.h>
 #endif
@@ -144,10 +146,13 @@ namespace esphome
         if (egmode == 2)
           res += "O"; // offline
 
-        if (mqtt::global_mqtt_client->is_connected())
+#ifdef USE_MQTT
+        if (mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected())
           // mqtt server
           res += "Q";
-        else if (wifi::global_wifi_component->is_connected())
+        else
+#endif
+        if (wifi::global_wifi_component->is_connected())
         {
           // wifi
           if (is_service_hotspot)
@@ -426,8 +431,12 @@ namespace esphome
 
 #ifdef GSMART_FEATURE_SCHEDULE
         // check schedule
+        bool schedule_allowed = true;
+#ifdef GSMART_FEATURE_REGION
+        schedule_allowed = ((this->region->isRegionActive() && this->region->isMaster()) || (!this->region->isRegionActive()));
+#endif
         if (this->schedule->enabled && !situation.SchIsAborted &&
-            ((this->region->isRegionActive() && this->region->isMaster()) || (!this->region->isRegionActive())) &&
+            schedule_allowed &&
             (this->global->radiation.activeMode == RadiationMode::OFF || (this->global->radiation.activeMode != RadiationMode::OFF && this->global->radiation.lastSource == RadiationSource::SCH)))
           return schedule->getCurrentRadiationMode(now);
 #endif
@@ -507,8 +516,12 @@ namespace esphome
       void add_on_situation_duration_change(std::function<void()> &&callback) { this->situation_duration_change_callback_.add(std::move(callback)); }
       void add_on_change_radiation_mode(std::function<void(RadiationMode)> &&callback) { this->change_radiation_mode_callback_.add(std::move(callback)); }
 
-      FileSystem *file_system_;
-      SettingsSchedule *schedule;
+#ifdef GSMART_FEATURE_FILESYSTEM
+      FileSystem *file_system_ = nullptr;
+#endif
+#ifdef GSMART_FEATURE_SCHEDULE
+      SettingsSchedule *schedule = nullptr;
+#endif
 #ifdef GSMART_FEATURE_REGION
       DataRegion *region = new DataRegion();
 #endif
@@ -516,8 +529,10 @@ namespace esphome
       DataUsage *usage = new DataUsage();
 #endif
       DataGlobal *global = new DataGlobal();
+#ifdef GSMART_FEATURE_FILESYSTEM
       SettingsMode *settingsMode = new SettingsMode();
       SettingsDevice *settingsDevice = new SettingsDevice();
+#endif
 
     protected:
       std::string _model;

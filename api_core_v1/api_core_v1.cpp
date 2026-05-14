@@ -307,7 +307,11 @@ void ApiCoreV1::build_info(JsonObject root) {
 
   JsonObject capabilities = root["capabilities"].to<JsonObject>();
   capabilities["control"] = true;
+#ifdef GSMART_REX_BASIC_REST
+  capabilities["diagnostics"] = false;
+#else
   capabilities["diagnostics"] = true;
+#endif
 #ifdef GSMART_FEATURE_SCHEDULE
   capabilities["scheduler"] = true;
 #else
@@ -1020,15 +1024,23 @@ bool ApiCoreV1::apply_settings_consumables(JsonObject root) {
 
 // --- Settings: Modes ---
 void ApiCoreV1::build_settings_modes(JsonObject root) {
+#ifdef GSMART_FEATURE_FILESYSTEM
   if (storage::store == nullptr || storage::store->settingsMode == nullptr) return;
   storage::store->settingsMode->toJson(root);
+#else
+  root["enabled"] = false;
+#endif
 }
 
 bool ApiCoreV1::apply_settings_modes(JsonObject root) {
+#ifdef GSMART_FEATURE_FILESYSTEM
   if (storage::store == nullptr || storage::store->settingsMode == nullptr) return false;
   storage::store->settingsMode->fromJson(root);
   storage::store->settingsMode->saveToFile();
   return true;
+#else
+  return false;
+#endif
 }
 
 }  // namespace api_core_v1

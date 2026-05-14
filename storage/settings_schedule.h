@@ -9,7 +9,9 @@
 #include "esphome/core/log.h"
 
 // #define FACTORY_SCHEDULE_ENABLED false
-// SCHEDULE_SETTINGS_FILE is defined in fileSystem.h
+#ifndef SCHEDULE_SETTINGS_FILE
+#define SCHEDULE_SETTINGS_FILE "/schedule.json"
+#endif
 
 namespace esphome
 {
