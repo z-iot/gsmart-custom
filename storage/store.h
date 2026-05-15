@@ -4,6 +4,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/controller.h"
+#include <cstring>
 #include <vector>
 #include "esphome/core/helpers.h"
 #ifdef GSMART_FEATURE_SCHEDULE
@@ -74,6 +75,25 @@ namespace esphome
       const std::string get_model() { return this->_model; }
       uint8_t get_model_num() { return this->_model_num; }
       const std::string get_serial() { return esphome::get_mac_address().substr(6); }
+
+      void setRadiationCause(RadiationCauseKind kind, const std::string &detail = "")
+      {
+        this->pending_radiation_cause_ = this->makeLocalRadiationCause_(kind, detail);
+      }
+
+      void setRadiationCauseFromRemote(RadiationCause cause, RadiationCauseKind fallback_kind,
+                                       const uint8_t origin_mac[6] = nullptr)
+      {
+        if (cause.kind == RadiationCauseKind::UNKNOWN)
+          cause.kind = fallback_kind;
+        if (cause.detail[0] == 0)
+          this->copyString_(cause.detail, sizeof(cause.detail), radiationCauseKindToApi(cause.kind));
+        if (this->macIsEmpty_(cause.originMac) && origin_mac != nullptr)
+          memcpy(cause.originMac, origin_mac, sizeof(cause.originMac));
+        this->pending_radiation_cause_ = cause;
+      }
+
+      const RadiationCause &getLastRadiationCause() const { return this->global->radiation.lastCause; }
 
       bool isScheduleAuthority() const
       {
@@ -357,8 +377,12 @@ namespace esphome
       void setActiveRadiationMode(time_t now, RadiationMode mode, RadiationSource source)
       {
         SituationInfo &situation = this->global->situation;
+        RadiationCause cause = this->consumeRadiationCause_(source);
         if (this->global->radiation.activeMode == mode)
+        {
+          this->global->radiation.lastCause = cause;
           return;
+        }
 
         uint32_t nowMs = millis() / 1000;
         if (mode != RadiationMode::OFF)
@@ -417,6 +441,7 @@ namespace esphome
 
         this->global->radiation.lastSource = source;
         this->global->radiation.activeMode = mode;
+        this->global->radiation.lastCause = cause;
 
 #ifdef GSMART_FEATURE_SCHEDULE
         situation.SchedulerActive = this->schedule->enabled;
@@ -428,6 +453,7 @@ namespace esphome
         situation.source = source;
 
         this->situation_change_callback_.call();
+        this->radiation_applied_callback_.call(mode, source);
 
         ESP_LOGW("store", "radiation: total: %d, now: %d, beamBegin: %d, beamed: %d", situation.CurrentTotalSec, convertFromEspTimeToSituationSec(now), situation.BeamBeginTime, situation.CurrentBeamedSec);
       }
@@ -474,14 +500,13 @@ namespace esphome
           // TODO change active schedule radiation
         }
 
-#ifdef GSMART_EMITTER
         auto m = this->getCurrentScheduleRadiation(now);
         if (m != this->global->radiation.activeMode)
         {
           ESP_LOGI("radiation", "Change mode from scheduler to %s", convertRadiationModeToStr(m).c_str());
+          this->setRadiationCause(RadiationCauseKind::SCHEDULER, "scheduler");
           this->change_radiation_mode_callback_.call(m);
         }
-#endif
 
         if (this->isSituationActive())
         {
@@ -528,6 +553,7 @@ namespace esphome
       void add_on_situation_change(std::function<void()> &&callback) { this->situation_change_callback_.add(std::move(callback)); }
       void add_on_situation_duration_change(std::function<void()> &&callback) { this->situation_duration_change_callback_.add(std::move(callback)); }
       void add_on_change_radiation_mode(std::function<void(RadiationMode)> &&callback) { this->change_radiation_mode_callback_.add(std::move(callback)); }
+      void add_on_radiation_applied(std::function<void(RadiationMode, RadiationSource)> &&callback) { this->radiation_applied_callback_.add(std::move(callback)); }
 
 #ifdef GSMART_FEATURE_FILESYSTEM
       FileSystem *file_system_ = nullptr;
@@ -551,10 +577,64 @@ namespace esphome
       std::string _model;
       uint8_t _model_num;
       std::string lastSituationDuration = "";
+      RadiationCause pending_radiation_cause_{};
 
       CallbackManager<void()> situation_change_callback_{};
       CallbackManager<void()> situation_duration_change_callback_{};
       CallbackManager<void(RadiationMode)> change_radiation_mode_callback_{};
+      CallbackManager<void(RadiationMode, RadiationSource)> radiation_applied_callback_{};
+
+      static void copyString_(char *target, size_t target_size, const std::string &value)
+      {
+        if (target_size == 0)
+          return;
+        strncpy(target, value.c_str(), target_size - 1);
+        target[target_size - 1] = 0;
+      }
+
+      static bool macIsEmpty_(const uint8_t mac[6])
+      {
+        for (int i = 0; i < 6; i++)
+          if (mac[i] != 0)
+            return false;
+        return true;
+      }
+
+      RadiationCause makeLocalRadiationCause_(RadiationCauseKind kind, const std::string &detail)
+      {
+        RadiationCause cause{};
+        cause.kind = kind;
+        this->copyString_(cause.detail, sizeof(cause.detail), detail.empty() ? radiationCauseKindToApi(kind) : detail);
+        get_mac_address_raw(cause.originMac);
+        this->copyString_(cause.originSerial, sizeof(cause.originSerial), this->get_serial());
+        this->copyString_(cause.originModel, sizeof(cause.originModel), this->get_model());
+        return cause;
+      }
+
+      RadiationCause makeDefaultRadiationCause_(RadiationSource source)
+      {
+        switch (source)
+        {
+        case RadiationSource::SCH:
+          return this->makeLocalRadiationCause_(RadiationCauseKind::SCHEDULER, "scheduler");
+        case RadiationSource::REGION:
+          return this->makeLocalRadiationCause_(RadiationCauseKind::UDP_CONTROL, "region");
+        case RadiationSource::EXT:
+          return this->makeLocalRadiationCause_(RadiationCauseKind::MOBILE_API, "mobile_api");
+        case RadiationSource::INT:
+        default:
+          return this->makeLocalRadiationCause_(RadiationCauseKind::BUTTON, "local");
+        }
+      }
+
+      RadiationCause consumeRadiationCause_(RadiationSource source)
+      {
+        RadiationCause cause = this->pending_radiation_cause_;
+        this->pending_radiation_cause_ = RadiationCause{};
+        if (cause.kind == RadiationCauseKind::UNKNOWN)
+          cause = this->makeDefaultRadiationCause_(source);
+        return cause;
+      }
     };
 
     class SituationChangeTrigger : public Trigger<>
@@ -584,6 +664,16 @@ namespace esphome
       {
         parent->add_on_change_radiation_mode([this](RadiationMode mode)
                                              { this->trigger(mode); });
+      }
+    };
+
+    class RadiationAppliedTrigger : public Trigger<RadiationMode, RadiationSource>
+    {
+    public:
+      explicit RadiationAppliedTrigger(Store *parent)
+      {
+        parent->add_on_radiation_applied([this](RadiationMode mode, RadiationSource source)
+                                         { this->trigger(mode, source); });
       }
     };
 

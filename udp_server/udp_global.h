@@ -2,6 +2,7 @@
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/global.h"
+#include "esphome/components/storage/data_global.h"
 #include "esphome/components/storage/data_region.h"
 
 #define MESSAGE_SYSINFO_REPEAT_SEC 3600*3
@@ -249,6 +250,7 @@ namespace esphome
       uint32_t sequence;
       storage::RadiationMode mode;
       KindRadiationSource source;
+      storage::RadiationCause cause;
     };
 
     std::string packetRegionIntentToJsonStr(PacketRegionIntent packet);

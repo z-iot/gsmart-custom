@@ -18,6 +18,63 @@ namespace esphome
       REGION = 4,
     };
 
+    enum class RadiationCauseKind : uint8_t
+    {
+      UNKNOWN = 0,
+      BUTTON = 1,
+      SCHEDULER = 2,
+      MOBILE_API = 3,
+      MQTT = 4,
+      REGION_INTENT = 5,
+      UDP_CONTROL = 6,
+    };
+
+    inline const char *radiationCauseKindToApi(RadiationCauseKind kind)
+    {
+      switch (kind)
+      {
+      case RadiationCauseKind::BUTTON:
+        return "button";
+      case RadiationCauseKind::SCHEDULER:
+        return "scheduler";
+      case RadiationCauseKind::MOBILE_API:
+        return "mobile_api";
+      case RadiationCauseKind::MQTT:
+        return "mqtt";
+      case RadiationCauseKind::REGION_INTENT:
+        return "region_intent";
+      case RadiationCauseKind::UDP_CONTROL:
+        return "udp_control";
+      default:
+        return "unknown";
+      }
+    }
+
+    inline const char *radiationSourceToApi(RadiationSource source)
+    {
+      switch (source)
+      {
+      case RadiationSource::EXT:
+        return "external";
+      case RadiationSource::SCH:
+        return "scheduler";
+      case RadiationSource::REGION:
+        return "region";
+      case RadiationSource::INT:
+      default:
+        return "internal";
+      }
+    }
+
+    struct RadiationCause
+    {
+      RadiationCauseKind kind = RadiationCauseKind::UNKNOWN;
+      char detail[24] = {0};
+      uint8_t originMac[6] = {0, 0, 0, 0, 0, 0};
+      char originSerial[16] = {0};
+      char originModel[16] = {0};
+    };
+
     struct RadiationSettings
     {
       uint32_t guardDuration = 3 * 60 * 60; // 3hod
@@ -26,6 +83,7 @@ namespace esphome
       RadiationSource lastSource = RadiationSource::INT;
       uint32_t lastStart = 0;
       uint32_t lastStop = 0;
+      RadiationCause lastCause;
     };
 
     struct ConSettings

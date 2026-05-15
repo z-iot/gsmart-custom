@@ -39,6 +39,11 @@ namespace esphome
       return 0;
     }
 
+    bool isEmitterModel(uint8_t modelNum)
+    {
+      return modelNum == 11 || modelNum == 21 || modelNum == 22 || modelNum == 23;
+    }
+
     std::string convertRegionSerialtoStr(uint64_t serial)
     {
       if (serial == 0)

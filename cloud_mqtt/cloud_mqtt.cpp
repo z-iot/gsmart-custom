@@ -8,6 +8,8 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include <ctime>
+
 namespace esphome {
 namespace cloud_mqtt {
 
@@ -26,6 +28,26 @@ bool payload_starts_json_object(const std::string &payload) {
 std::string extract_msg_id(JsonObject root) {
   const char *msg_id = root["msg_id"] | "";
   return msg_id;
+}
+
+const char *radiation_mode_to_api(storage::RadiationMode mode) {
+  switch (mode) {
+    case storage::RadiationMode::MIN:
+      return "min";
+    case storage::RadiationMode::STD:
+      return "std";
+    case storage::RadiationMode::MAX:
+      return "max";
+    case storage::RadiationMode::ON:
+      return "on";
+    case storage::RadiationMode::OFF:
+    default:
+      return "off";
+  }
+}
+
+std::string mac_to_str(const uint8_t mac[6]) {
+  return str_sprintf("%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 }  // namespace
 
@@ -199,6 +221,67 @@ bool CloudMqtt::publish_ack_(const std::string &msg_id, const char *result, cons
       root["error"] = error;
     }
   });
+}
+
+bool CloudMqtt::publish_radiation_json_(const char *leaf, bool retain) {
+  if (mqtt::global_mqtt_client == nullptr || storage::store == nullptr) {
+    ESP_LOGW(TAG, "MQTT client or storage is not available, skip radiation publish");
+    return false;
+  }
+
+  bool region_scope = false;
+  std::string region_id;
+  std::string topic;
+#ifdef GSMART_FEATURE_REGION
+  if (storage::store->region != nullptr && storage::store->region->isRegionActive()) {
+    if (!storage::store->region->isMaster())
+      return false;
+    region_scope = true;
+    region_id = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+    topic = "region/" + region_id + "/radiation/" + leaf;
+  }
+#endif
+  if (topic.empty())
+    topic = this->getCloudTopic(std::string("radiation/") + leaf);
+
+  return this->publish_json(topic, [region_scope, region_id](JsonObject root) {
+    auto *store = storage::store;
+    const auto mode = store->global->radiation.activeMode;
+    const auto &situation = store->global->situation;
+    const auto &cause = store->global->radiation.lastCause;
+
+    root["event"] = "radiation_changed";
+    root["scope"] = region_scope ? "region" : "device";
+    if (region_scope)
+      root["regionId"] = region_id;
+    root["deviceModel"] = store->get_model();
+    root["deviceSerial"] = store->get_serial();
+    root["state"] = mode == storage::RadiationMode::OFF ? "off" : "on";
+    root["mode"] = radiation_mode_to_api(mode);
+    root["source"] = storage::radiationCauseKindToApi(cause.kind);
+    root["radiationSource"] = storage::radiationSourceToApi(store->global->radiation.lastSource);
+
+    JsonObject trigger = root["trigger"].to<JsonObject>();
+    trigger["kind"] = storage::radiationCauseKindToApi(cause.kind);
+    trigger["detail"] = cause.detail;
+    trigger["originSerial"] = cause.originSerial;
+    trigger["originMac"] = mac_to_str(cause.originMac);
+    trigger["originModel"] = cause.originModel;
+
+    JsonObject schedule = root["schedule"].to<JsonObject>();
+    schedule["active"] = situation.CurrentIsSchedule;
+    schedule["beginSec"] = situation.CurrentIsSchedule ? situation.CurrentBeginTime : situation.SchBeginTime;
+    schedule["endSec"] = situation.CurrentIsSchedule ? situation.CurrentEndTime : situation.SchEndTime;
+    schedule["plannedSec"] = situation.CurrentIsSchedule ? situation.CurrentTotalSec : situation.SchTotalSec;
+
+    JsonObject stats = root["stats"].to<JsonObject>();
+    stats["activeSec"] = situation.CurrentBeamedSec;
+    stats["prevActiveSec"] = situation.PrevBeamedSec;
+    stats["prevTotalSec"] = situation.PrevTotalSec;
+
+    root["ts"] = static_cast<uint32_t>(time(nullptr));
+    root["uptimeSec"] = millis() / 1000;
+  }, 0, retain);
 }
 
 #ifdef GSMART_FEATURE_REGION

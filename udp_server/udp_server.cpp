@@ -115,6 +115,8 @@ namespace esphome
     {
       if (packet.master_index >= packet.member_count || packet.master_index >= 16)
         return false;
+      if (!storage::isEmitterModel(packet.members[packet.master_index].modelNum))
+        return false;
       return memcmp(packet.members[packet.master_index].mac, packet.mac, 6) == 0;
     }
 
@@ -435,6 +437,10 @@ namespace esphome
         packet.sequence = ++this->region_intent_sequence_;
       packet.mode = mode;
       packet.source = source;
+#ifdef USE_STORAGE
+      if (storage::store != nullptr)
+        packet.cause = storage::store->getLastRadiationCause();
+#endif
       sendRegionIntent(packet);
     }
 
@@ -830,6 +836,11 @@ namespace esphome
           auto mac = str_sprintf("%02X%02X%02X", packetPing->mac[3], packetPing->mac[4], packetPing->mac[5]).c_str();
           ESP_LOGI(TAG, "PingReq received %s.", mac);
           this->sendPingRes();
+          uint8_t local_mac[6]{};
+          get_mac_address_raw(local_mac);
+          const uint32_t jitter_ms = 120 + ((local_mac[3] ^ local_mac[4] ^ local_mac[5]) % 18) * 35;
+          this->set_timeout("ping_sysinfo", jitter_ms, [this]()
+                            { this->sendSysInfo(); });
         }
         break;
       case PacketKind::PING_RES:

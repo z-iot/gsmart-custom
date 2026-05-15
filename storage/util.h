@@ -12,6 +12,8 @@ namespace esphome
 
     uint8_t convertModelToNum(const std::string &model);
 
+    bool isEmitterModel(uint8_t modelNum);
+
     std::string convertRegionSerialtoStr(uint64_t serial);
 
     uint64_t convertRegionSerialtoNum(std::string serial);

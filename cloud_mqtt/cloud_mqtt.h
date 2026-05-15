@@ -48,6 +48,8 @@ class CloudMqtt : public Component, public mqtt::CustomMQTTDevice {
   bool publish_motion(const json::json_build_t &f) { return this->publish_cloud_json("motion", f); }
   bool publish_button(const json::json_build_t &f) { return this->publish_cloud_json("button", f); }
   bool publish_setup(const json::json_build_t &f) { return this->publish_cloud_json("setup", f); }
+  bool publish_radiation_event() { return this->publish_radiation_json_("event", false); }
+  bool publish_radiation_state() { return this->publish_radiation_json_("state", true); }
 
 #ifdef GSMART_FEATURE_REGION
   void regionSubscribe(std::string region_serial);
@@ -74,6 +76,7 @@ class CloudMqtt : public Component, public mqtt::CustomMQTTDevice {
   bool dispatch_command_(const std::vector<CloudCmdListener *> &listeners, const std::string &topic,
                          const std::string &payload);
   bool publish_ack_(const std::string &msg_id, const char *result, const char *error);
+  bool publish_radiation_json_(const char *leaf, bool retain);
 
   std::string topic_base_{};
   std::string device_command_topic_prefix_{};

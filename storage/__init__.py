@@ -14,15 +14,20 @@ CONF_MODEL = "model"
 CONF_ON_SITUATION_CHANGE = "on_situation_change"
 CONF_ON_SITUATION_DURATION_CHANGE = "on_situation_duration_change"
 CONF_ON_CHANGE_RADIATION_MODE = "on_change_radiation_mode"
+CONF_ON_RADIATION_APPLIED = "on_radiation_applied"
 CONF_FILESYSTEM = "filesystem"
 
 storage_ns = cg.esphome_ns.namespace("storage")
 RadiationMode = storage_ns.enum("RadiationMode")
+RadiationSource = storage_ns.enum("RadiationSource")
 Store = storage_ns.class_("Store", cg.Component, cg.Controller)
 
 SituationChangeTrigger = storage_ns.class_("SituationChangeTrigger", automation.Trigger.template())
 SituationDurationChangeTrigger = storage_ns.class_("SituationDurationChangeTrigger", automation.Trigger.template())
 ChangeRadiationModeTrigger = storage_ns.class_("ChangeRadiationModeTrigger", automation.Trigger.template())
+RadiationAppliedTrigger = storage_ns.class_(
+    "RadiationAppliedTrigger", automation.Trigger.template(RadiationMode, RadiationSource)
+)
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
@@ -43,6 +48,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_CHANGE_RADIATION_MODE): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ChangeRadiationModeTrigger),
+                }
+            ),
+            cv.Optional(CONF_ON_RADIATION_APPLIED): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(RadiationAppliedTrigger),
                 }
             ),
         },
@@ -98,6 +108,11 @@ async def to_code(config):
     for conf in config.get(CONF_ON_CHANGE_RADIATION_MODE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(RadiationMode, "x")], conf)
+    for conf in config.get(CONF_ON_RADIATION_APPLIED, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(
+            trigger, [(RadiationMode, "mode"), (RadiationSource, "source")], conf
+        )
 
     # if CORE.is_esp32:
     #     cg.add_library("DNSServer", None)

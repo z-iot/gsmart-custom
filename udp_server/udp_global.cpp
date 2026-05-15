@@ -276,7 +276,13 @@ namespace esphome
                                 root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
                                 root["sequence"] = packet.sequence;
                                 root["mode"] = radiationModeToStr(packet.mode);
-                                root["source"] = kindRadiationSourceToStr(packet.source); });
+                                root["source"] = kindRadiationSourceToStr(packet.source);
+                                JsonObject cause = root["cause"].to<JsonObject>();
+                                cause["kind"] = storage::radiationCauseKindToApi(packet.cause.kind);
+                                cause["detail"] = packet.cause.detail;
+                                cause["originMac"] = macToStr(packet.cause.originMac);
+                                cause["originSerial"] = packet.cause.originSerial;
+                                cause["originModel"] = packet.cause.originModel; });
     }
   }
 }

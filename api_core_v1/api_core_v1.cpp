@@ -140,6 +140,21 @@ bool require_confirmation(JsonObject root, JsonObject response, const char *expe
   return false;
 }
 
+storage::RadiationCauseKind radiation_cause_from_request(JsonObject root) {
+  std::string cause = normalize_token(json_string(root["causeKind"], json_string(root["transport"], "mobile_api")));
+  if (cause == "mqtt")
+    return storage::RadiationCauseKind::MQTT;
+  return storage::RadiationCauseKind::MOBILE_API;
+}
+
+void set_radiation_request_cause(JsonObject root) {
+  const auto kind = radiation_cause_from_request(root);
+  std::string detail = json_string(root["causeDetail"]);
+  if (detail.empty())
+    detail = storage::radiationCauseKindToApi(kind);
+  storage::store->setRadiationCause(kind, detail);
+}
+
 void add_wifi_runtime(JsonObject root) {
   if (wifi::global_wifi_component == nullptr)
     return;
@@ -875,6 +890,7 @@ bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
   const std::string scope = normalize_token(json_string(root["scope"], "device"));
 
   if (scope == "device" || scope.empty()) {
+    set_radiation_request_cause(root);
     storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
     response["ok"] = true;
     response["mode"] = radiation_mode_to_api(mode);
@@ -922,6 +938,7 @@ bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
     return false;
   }
 
+  set_radiation_request_cause(root);
   storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::REGION);
   udp_server::udpServer->sendControlRadiation(mode, udp_server::KindRadiationSource::REGION_MASTER);
   udp_server::udpServer->sendSituationInfo();
@@ -1122,11 +1139,16 @@ bool ApiCoreV1::handle_api_config(JsonObject root, JsonObject response) {
     std::string mode = root["mode"].as<std::string>();
 #ifdef GSMART_FEATURE_REGION
     if (mode == "master") {
-      storage::store->region->layout.masterIndex = storage::store->region->selfIndex;
-      storage::store->region->save();
+      if (storage::isEmitterModel(storage::store->get_model_num()) && storage::store->region->selfIndex >= 0) {
+        storage::store->region->layout.masterIndex = storage::store->region->selfIndex;
+        storage::store->region->normalizeMasterIndex();
+        storage::store->region->save();
+        changed = true;
+      } else {
+        ESP_LOGW(TAG, "Ignoring region master request: only emitter models can be region master.");
+      }
     }
 #endif
-    changed = true;
   }
 
   response["ok"] = true;
@@ -1142,6 +1164,7 @@ bool ApiCoreV1::handle_api_manual_control(JsonObject root, JsonObject response) 
   }
   std::string cmd = normalize_token(root["command"].as<std::string>());
   storage::RadiationMode mode = (cmd == "on") ? storage::RadiationMode::STD : storage::RadiationMode::OFF;
+  set_radiation_request_cause(root);
   storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
 
   response["ok"] = true;

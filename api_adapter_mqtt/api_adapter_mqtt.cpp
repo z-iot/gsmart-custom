@@ -51,6 +51,7 @@ void ApiAdapterMqtt::on_message_(const std::string &topic, const std::string &pa
     } else if (sub_topic == "consumption/get") {
       this->publish_response_("consumption/state", rid, [this](JsonObject res) { this->core_->build_consumption(res); });
     } else if (sub_topic == "control/mode/set") {
+      root["causeKind"] = "mqtt";
       this->publish_response_("control/mode/res", rid, [this, root](JsonObject res) { this->core_->handle_control_mode(root, res); });
     } else if (sub_topic == "control/identify/set") {
       this->publish_response_("control/identify/res", rid, [this, root](JsonObject res) { this->core_->handle_identify(root, res); });

@@ -114,6 +114,33 @@ namespace esphome
             break;
           }
         }
+        this->normalizeMasterIndex();
+      }
+
+      int16_t firstEmitterMemberIndex() const
+      {
+        for (int i = 0; i < this->layout.memberCount; i++)
+          if (isEmitterModel(this->layout.members[i].modelNum))
+            return i;
+        return -1;
+      }
+
+      bool isEmitterMember(uint8_t index) const
+      {
+        return index < this->layout.memberCount && isEmitterModel(this->layout.members[index].modelNum);
+      }
+
+      void normalizeMasterIndex()
+      {
+        if (this->layout.memberCount == 0)
+        {
+          this->layout.masterIndex = 0;
+          return;
+        }
+        if (this->isEmitterMember(this->layout.masterIndex))
+          return;
+        const int16_t first_emitter_index = this->firstEmitterMemberIndex();
+        this->layout.masterIndex = first_emitter_index >= 0 ? static_cast<uint8_t>(first_emitter_index) : this->layout.memberCount;
       }
 
       int16_t memberIndexForMac(const uint8_t mac[6]) const
@@ -133,7 +160,7 @@ namespace esphome
 
       bool isMasterMac(const uint8_t mac[6]) const
       {
-        if (!this->isRegionActive() || this->layout.masterIndex >= this->layout.memberCount)
+        if (!this->isRegionActive() || !this->isEmitterMember(this->layout.masterIndex))
           return false;
         return memcmp(this->layout.members[this->layout.masterIndex].mac, mac, 6) == 0;
       }
@@ -170,7 +197,7 @@ namespace esphome
 
       bool isMaster() const
       {
-        return isRegionActive() && this->selfIndex == this->layout.masterIndex;
+        return isRegionActive() && this->selfIndex >= 0 && this->selfIndex == this->layout.masterIndex && this->isEmitterMember(this->selfIndex);
       }
 
       bool isRegionActive() const
