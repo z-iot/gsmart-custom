@@ -156,6 +156,21 @@ void EspServer::setup_interval() {
       this->events_send(udp_server::packetIdentityToJsonStr(packet).c_str(), "udp_identity");
 #endif
     });
+    udp_server::udpServer->add_on_situation_callback([this](udp_server::PacketSituation packet) {
+#ifdef USE_ESP32
+      this->events_send(udp_server::packetSituationToJsonStr(packet).c_str(), "udp_situation");
+#endif
+    });
+    udp_server::udpServer->add_on_region_layout_callback([this](udp_server::PacketRegionLayout packet) {
+#ifdef USE_ESP32
+      this->events_send(udp_server::packetRegionLayoutToJsonStr(packet).c_str(), "udp_region_layout");
+#endif
+    });
+    udp_server::udpServer->add_on_region_intent_callback([this](udp_server::PacketRegionIntent packet) {
+#ifdef USE_ESP32
+      this->events_send(udp_server::packetRegionIntentToJsonStr(packet).c_str(), "udp_region_intent");
+#endif
+    });
   }
 #endif
 

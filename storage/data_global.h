@@ -15,6 +15,7 @@ namespace esphome
       INT = 1,
       EXT = 2,
       SCH = 3,
+      REGION = 4,
     };
 
     struct RadiationSettings

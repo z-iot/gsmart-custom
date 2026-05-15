@@ -2,6 +2,7 @@
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/global.h"
+#include "esphome/components/storage/data_region.h"
 
 #define MESSAGE_SYSINFO_REPEAT_SEC 3600*3
 #define MESSAGE_STATUSINFO_REPEAT_SEC 60
@@ -47,6 +48,9 @@ namespace esphome
       IDENTITY = 53,
       RECONFIG = 54,
       MANAGEMENT = 55,
+      SITUATION = 56,
+      REGION_LAYOUT = 57,
+      REGION_INTENT = 58,
     };
 
     std::string packetKindToStr(PacketKind item);
@@ -60,7 +64,8 @@ namespace esphome
       ACTUATOR = 21,
       EMITTER = 22,
       SCHEDULLER = 23,
-      // REGION_MASTER = 31,
+      SWITCH = 24,
+      REGION_MASTER = 31,
     };
 
     std::string kindRadiationSourceToStr(KindRadiationSource item);
@@ -179,6 +184,74 @@ namespace esphome
       uint8_t mac[6];
       uint64_t region_id;
     };
+
+    struct PacketSituation
+    {
+      uint8_t mac[6];
+      uint64_t region_id;
+      KindRadiationSource source;
+      storage::RadiationMode active_mode;
+      bool scheduler_active;
+      uint16_t scheduler_items_count;
+      bool current_is_active;
+      bool current_is_schedule;
+      bool current_is_external;
+      storage::RadiationMode current_mode;
+      uint32_t current_begin_time;
+      uint32_t current_end_time;
+      uint16_t current_beamed_sec;
+      uint16_t current_total_sec;
+      storage::RadiationMode prev_mode;
+      uint32_t prev_begin_time;
+      uint32_t prev_end_time;
+      uint16_t prev_beamed_sec;
+      uint16_t prev_total_sec;
+      storage::RadiationMode schedule_mode;
+      uint32_t schedule_begin_time;
+      uint32_t schedule_end_time;
+      uint16_t schedule_total_sec;
+      bool schedule_is_aborted;
+      storage::RadiationMode next_mode;
+      uint32_t next_begin_time;
+      uint32_t next_end_time;
+      uint16_t next_total_sec;
+    };
+
+    std::string packetSituationToJsonStr(PacketSituation packet);
+
+    enum class RegionLayoutAction : uint8_t
+    {
+      REQUEST = 1,
+      PUSH = 2,
+      RESPONSE = 3,
+    };
+
+    std::string regionLayoutActionToStr(RegionLayoutAction item);
+
+    struct PacketRegionLayout
+    {
+      uint8_t mac[6];
+      uint64_t region_id;
+      RegionLayoutAction action;
+      uint16_t udp_channel;
+      uint32_t config_version;
+      uint8_t master_index;
+      uint8_t member_count;
+      storage::RegionMember members[16];
+    };
+
+    std::string packetRegionLayoutToJsonStr(PacketRegionLayout packet);
+
+    struct PacketRegionIntent
+    {
+      uint8_t origin_mac[6];
+      uint64_t region_id;
+      uint32_t sequence;
+      storage::RadiationMode mode;
+      KindRadiationSource source;
+    };
+
+    std::string packetRegionIntentToJsonStr(PacketRegionIntent packet);
 
     enum class ManagementAction : uint8_t
     {

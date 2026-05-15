@@ -90,6 +90,47 @@ namespace esphome
       return memcmp(target_mac, local_mac, sizeof(local_mac)) == 0;
     }
 
+    bool UdpServer::packetSenderIsRegionMaster(const uint8_t mac[6]) const
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr)
+        return storage::store->region->isMasterMac(mac);
+#endif
+      return false;
+    }
+
+    bool UdpServer::packetHasLocalMember(const PacketRegionLayout &packet) const
+    {
+      uint8_t local_mac[6];
+      get_mac_address_raw(local_mac);
+      for (int i = 0; i < packet.member_count && i < 16; i++)
+      {
+        if (memcmp(packet.members[i].mac, local_mac, sizeof(local_mac)) == 0)
+          return true;
+      }
+      return false;
+    }
+
+    bool UdpServer::packetMasterMatchesSender(const PacketRegionLayout &packet) const
+    {
+      if (packet.master_index >= packet.member_count || packet.master_index >= 16)
+        return false;
+      return memcmp(packet.members[packet.master_index].mac, packet.mac, 6) == 0;
+    }
+
+    bool UdpServer::dedupeRegionIntent(const PacketRegionIntent &packet)
+    {
+      const std::string key = macToStr(packet.origin_mac);
+      auto it = this->recent_region_intents_.find(key);
+      if (it != this->recent_region_intents_.end() && it->second == packet.sequence)
+        return true;
+
+      this->recent_region_intents_[key] = packet.sequence;
+      if (this->recent_region_intents_.size() > 24)
+        this->recent_region_intents_.erase(this->recent_region_intents_.begin());
+      return false;
+    }
+
     bool UdpServer::managementPacketAllowed(const PacketManagement &packet, bool main) const
     {
       if (!this->targetMacMatches(packet.target_mac))
@@ -195,6 +236,98 @@ namespace esphome
       }
     }
 
+    void UdpServer::applyRegionLayoutPacket(const PacketRegionLayout &packet)
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr)
+        return;
+      if (packet.region_id == 0 || packet.member_count == 0 || packet.member_count > 16)
+        return;
+      if (this->targetMacMatches(packet.mac))
+        return;
+      if (!this->packetMasterMatchesSender(packet))
+      {
+        ESP_LOGD(TAG, "Ignoring region layout from non-master sender.");
+        return;
+      }
+      if (!this->packetHasLocalMember(packet))
+      {
+        ESP_LOGD(TAG, "Ignoring region layout without this device as member.");
+        return;
+      }
+
+      const uint64_t current_region_id = this->currentRegionId();
+      if (current_region_id != 0 && current_region_id != packet.region_id)
+      {
+        ESP_LOGD(TAG, "Ignoring region layout for another region.");
+        return;
+      }
+      if (storage::store->region->metadata.configVersion > packet.config_version)
+      {
+        ESP_LOGD(TAG, "Ignoring older region layout version %u; local %u.",
+                 packet.config_version, storage::store->region->metadata.configVersion);
+        return;
+      }
+
+      storage::store->region->layout.serial = packet.region_id;
+      storage::store->region->layout.masterIndex = packet.master_index;
+      storage::store->region->layout.memberCount = packet.member_count;
+      for (int i = 0; i < packet.member_count; i++)
+        storage::store->region->layout.members[i] = packet.members[i];
+      storage::store->region->metadata.udpChannel = packet.udp_channel;
+      storage::store->region->metadata.configVersion = packet.config_version;
+      storage::store->region->recalculateLayout();
+      storage::store->region->save();
+      if (packet.udp_channel != channel_)
+        this->changeChannel(packet.udp_channel);
+      ESP_LOGI(TAG, "Applied region layout %s version %u channel %u.",
+               storage::convertRegionSerialtoStr(packet.region_id).c_str(),
+               packet.config_version, packet.udp_channel);
+#endif
+    }
+
+    void UdpServer::applySituationPacket(const PacketSituation &packet)
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr)
+        return;
+      if (!this->packetSenderIsRegionMaster(packet.mac))
+      {
+        ESP_LOGD(TAG, "Ignoring situation from non-master sender.");
+        return;
+      }
+
+      auto &situation = storage::store->global->situation;
+      situation.SchedulerActive = packet.scheduler_active;
+      situation.SchedulerItemsCount = packet.scheduler_items_count;
+      situation.source = storage::RadiationSource::REGION;
+      situation.CurrentIsActive = packet.current_is_active;
+      situation.CurrentIsSchedule = packet.current_is_schedule;
+      situation.CurrentIsExternal = packet.current_is_external;
+      situation.CurrentMode = packet.current_mode;
+      situation.CurrentBeginTime = packet.current_begin_time;
+      situation.CurrentEndTime = packet.current_end_time;
+      situation.CurrentBeamedSec = packet.current_beamed_sec;
+      situation.CurrentTotalSec = packet.current_total_sec;
+      situation.PrevMode = packet.prev_mode;
+      situation.PrevBeginTime = packet.prev_begin_time;
+      situation.PrevEndTime = packet.prev_end_time;
+      situation.PrevBeamedSec = packet.prev_beamed_sec;
+      situation.PrevTotalSec = packet.prev_total_sec;
+      situation.SchMode = packet.schedule_mode;
+      situation.SchBeginTime = packet.schedule_begin_time;
+      situation.SchEndTime = packet.schedule_end_time;
+      situation.SchTotalSec = packet.schedule_total_sec;
+      situation.SchIsAborted = packet.schedule_is_aborted;
+      situation.NextMode = packet.next_mode;
+      situation.NextBeginTime = packet.next_begin_time;
+      situation.NextEndTime = packet.next_end_time;
+      situation.NextTotalSec = packet.next_total_sec;
+      storage::store->global->radiation.lastSource = storage::RadiationSource::REGION;
+      storage::store->notifySituationChange();
+#endif
+    }
+
     void UdpServer::sendSysInfo()
     {
       PacketSysInfo packet{};
@@ -259,6 +392,52 @@ namespace esphome
       sendIdentity(packet);
     }
 
+    void UdpServer::sendSituationInfo()
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isMaster())
+        return;
+      PacketSituation packet = fillSituation();
+      sendSituation(packet);
+#endif
+    }
+
+    void UdpServer::sendRegionLayoutPush(bool main)
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isMaster())
+        return;
+      PacketRegionLayout packet = fillRegionLayout(RegionLayoutAction::PUSH);
+      sendRegionLayout(packet, main || channel_ == 0);
+#endif
+    }
+
+    void UdpServer::sendRegionLayoutRequest()
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isRegionActive())
+        return;
+      PacketRegionLayout packet = fillRegionLayout(RegionLayoutAction::REQUEST);
+      if (channel_ != 0)
+        sendRegionLayout(packet, false);
+      if (channel_ == 0 || !storage::store->region->hasMembers())
+        sendRegionLayout(packet, true);
+#endif
+    }
+
+    void UdpServer::sendRegionIntent(storage::RadiationMode mode, KindRadiationSource source)
+    {
+      PacketRegionIntent packet{};
+      get_mac_address_raw(packet.origin_mac);
+      packet.region_id = this->currentRegionId();
+      packet.sequence = ++this->region_intent_sequence_;
+      if (packet.sequence == 0)
+        packet.sequence = ++this->region_intent_sequence_;
+      packet.mode = mode;
+      packet.source = source;
+      sendRegionIntent(packet);
+    }
+
     void UdpServer::sendControl(PacketControl packet)
     {
       get_mac_address_raw(packet.mac);
@@ -287,6 +466,28 @@ namespace esphome
       sendMessage(false, PacketKind::RECONFIG, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
     }
 
+    void UdpServer::sendSituation(PacketSituation packet)
+    {
+      get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
+      sendMessage(false, PacketKind::SITUATION, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+    }
+
+    void UdpServer::sendRegionLayout(PacketRegionLayout packet, bool main)
+    {
+      get_mac_address_raw(packet.mac);
+      if (packet.region_id == 0)
+        packet.region_id = this->currentRegionId();
+      sendMessage(main, PacketKind::REGION_LAYOUT, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+    }
+
+    void UdpServer::sendRegionIntent(PacketRegionIntent packet)
+    {
+      if (packet.region_id == 0)
+        packet.region_id = this->currentRegionId();
+      sendMessage(false, PacketKind::REGION_INTENT, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+    }
+
     PacketStatus UdpServer::fillStatus()
     {
       PacketStatus packet{};
@@ -308,6 +509,66 @@ namespace esphome
       get_mac_address_raw(packet.mac);
       packet.region_id = this->currentRegionId();
       this->identity_fill_callback_.call(packet);
+      return packet;
+    }
+
+    PacketSituation UdpServer::fillSituation()
+    {
+      PacketSituation packet{};
+      get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
+      packet.source = KindRadiationSource::REGION_MASTER;
+#ifdef USE_STORAGE
+      if (storage::store != nullptr)
+      {
+        auto &situation = storage::store->global->situation;
+        packet.active_mode = storage::store->global->radiation.activeMode;
+        packet.scheduler_active = situation.SchedulerActive;
+        packet.scheduler_items_count = situation.SchedulerItemsCount;
+        packet.current_is_active = situation.CurrentIsActive;
+        packet.current_is_schedule = situation.CurrentIsSchedule;
+        packet.current_is_external = situation.CurrentIsExternal;
+        packet.current_mode = situation.CurrentMode;
+        packet.current_begin_time = situation.CurrentBeginTime;
+        packet.current_end_time = situation.CurrentEndTime;
+        packet.current_beamed_sec = situation.CurrentBeamedSec;
+        packet.current_total_sec = situation.CurrentTotalSec;
+        packet.prev_mode = situation.PrevMode;
+        packet.prev_begin_time = situation.PrevBeginTime;
+        packet.prev_end_time = situation.PrevEndTime;
+        packet.prev_beamed_sec = situation.PrevBeamedSec;
+        packet.prev_total_sec = situation.PrevTotalSec;
+        packet.schedule_mode = situation.SchMode;
+        packet.schedule_begin_time = situation.SchBeginTime;
+        packet.schedule_end_time = situation.SchEndTime;
+        packet.schedule_total_sec = situation.SchTotalSec;
+        packet.schedule_is_aborted = situation.SchIsAborted;
+        packet.next_mode = situation.NextMode;
+        packet.next_begin_time = situation.NextBeginTime;
+        packet.next_end_time = situation.NextEndTime;
+        packet.next_total_sec = situation.NextTotalSec;
+      }
+#endif
+      return packet;
+    }
+
+    PacketRegionLayout UdpServer::fillRegionLayout(RegionLayoutAction action)
+    {
+      PacketRegionLayout packet{};
+      get_mac_address_raw(packet.mac);
+      packet.region_id = this->currentRegionId();
+      packet.action = action;
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr)
+      {
+        packet.udp_channel = storage::store->region->metadata.udpChannel;
+        packet.config_version = storage::store->region->metadata.configVersion;
+        packet.master_index = storage::store->region->layout.masterIndex;
+        packet.member_count = storage::store->region->layout.memberCount > 16 ? 16 : storage::store->region->layout.memberCount;
+        for (int i = 0; i < packet.member_count; i++)
+          packet.members[i] = storage::store->region->layout.members[i];
+      }
+#endif
       return packet;
     }
 
@@ -348,6 +609,8 @@ namespace esphome
                          { this->sendSysInfo(); });
       this->set_interval(MESSAGE_STATUSINFO_REPEAT_SEC * 1000, [this]()
                          { this->sendStatusInfo(); });
+      this->set_interval(MESSAGE_STATUSINFO_REPEAT_SEC * 1000, [this]()
+                         { this->sendSituationInfo(); });
       this->set_interval(MESSAGE_IDENTITYINFO_REPEAT_SEC * 1000, [this]()
                          { this->sendIdentityInfo(); });
     }
@@ -456,6 +719,15 @@ namespace esphome
 
       if (channel_ != 0)
         startMulticast(false);
+
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr &&
+          storage::store->region->isRegionActive() && !storage::store->region->isMaster())
+      {
+        this->set_timeout("region_layout_request", 1500, [this]()
+                          { this->sendRegionLayoutRequest(); });
+      }
+#endif
     }
 
     void UdpServer::wifiDisconnect()
@@ -584,6 +856,8 @@ namespace esphome
             ESP_LOGD(TAG, "Ignoring Control for another region.");
             break;
           }
+          if (this->targetMacMatches(packetControl->mac))
+            break;
           this->control_callback_.call(*packetControl);
         }
         break;
@@ -624,6 +898,68 @@ namespace esphome
             break;
           }
           this->reconfig_callback_.call(*packetReconfig);
+        }
+        break;
+      case PacketKind::SITUATION:
+        if (packet.body.size() == sizeof(PacketSituation))
+        {
+          auto *data = packet.body.data();
+          PacketSituation *packetSituation = reinterpret_cast<PacketSituation *>(data);
+          if (!this->packetRegionAllowed(packetSituation->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring Situation for another region.");
+            break;
+          }
+          if (this->targetMacMatches(packetSituation->mac))
+            break;
+          this->applySituationPacket(*packetSituation);
+          this->situation_callback_.call(*packetSituation);
+        }
+        break;
+      case PacketKind::REGION_LAYOUT:
+        if (packet.body.size() == sizeof(PacketRegionLayout))
+        {
+          auto *data = packet.body.data();
+          PacketRegionLayout *packetRegionLayout = reinterpret_cast<PacketRegionLayout *>(data);
+          if (this->targetMacMatches(packetRegionLayout->mac))
+            break;
+
+          if (packetRegionLayout->action == RegionLayoutAction::REQUEST)
+          {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+            if (storage::store != nullptr && storage::store->region != nullptr &&
+                storage::store->region->isMaster() &&
+                packetRegionLayout->region_id == storage::store->region->layout.serial &&
+                storage::store->region->isMemberMac(packetRegionLayout->mac))
+            {
+              PacketRegionLayout response = fillRegionLayout(RegionLayoutAction::RESPONSE);
+              sendRegionLayout(response, main);
+            }
+#endif
+          }
+          else if (packetRegionLayout->action == RegionLayoutAction::PUSH ||
+                   packetRegionLayout->action == RegionLayoutAction::RESPONSE)
+          {
+            this->applyRegionLayoutPacket(*packetRegionLayout);
+          }
+          this->region_layout_callback_.call(*packetRegionLayout);
+        }
+        break;
+      case PacketKind::REGION_INTENT:
+        if (packet.body.size() == sizeof(PacketRegionIntent))
+        {
+          auto *data = packet.body.data();
+          PacketRegionIntent *packetRegionIntent = reinterpret_cast<PacketRegionIntent *>(data);
+          if (!this->packetRegionAllowed(packetRegionIntent->region_id))
+          {
+            ESP_LOGD(TAG, "Ignoring RegionIntent for another region.");
+            break;
+          }
+          if (this->targetMacMatches(packetRegionIntent->origin_mac))
+            break;
+          if (this->dedupeRegionIntent(*packetRegionIntent))
+            break;
+          this->region_intent_callback_.call(*packetRegionIntent);
         }
         break;
       case PacketKind::MANAGEMENT:

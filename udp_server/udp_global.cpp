@@ -34,6 +34,12 @@ namespace esphome
         return "RECONFIG";
       case PacketKind::MANAGEMENT:
         return "MANAGEMENT";
+      case PacketKind::SITUATION:
+        return "SITUATION";
+      case PacketKind::REGION_LAYOUT:
+        return "REGION_LAYOUT";
+      case PacketKind::REGION_INTENT:
+        return "REGION_INTENT";
       default:
         return "--unknown--";
       }
@@ -72,6 +78,10 @@ namespace esphome
         return "EMITTER";
       case KindRadiationSource::SCHEDULLER:
         return "SCHEDULLER";
+      case KindRadiationSource::SWITCH:
+        return "SWITCH";
+      case KindRadiationSource::REGION_MASTER:
+        return "REGION_MASTER";
       default:
         return "--unknown--";
       }
@@ -184,6 +194,89 @@ namespace esphome
                                 root["total_start_count"] = packet.total_start_count;
                                 root["total_usage_sec"] = packet.total_usage_sec;
                                 root["current_day"] = packet.current_day; });
+    }
+
+    std::string packetSituationToJsonStr(PacketSituation packet)
+    {
+      return json::build_json([packet](JsonObject root)
+                              {
+                                root["mac"] = macToStr(packet.mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
+                                root["source"] = kindRadiationSourceToStr(packet.source);
+                                root["activeMode"] = radiationModeToStr(packet.active_mode);
+                                root["schedulerActive"] = packet.scheduler_active;
+                                root["schedulerItemsCount"] = packet.scheduler_items_count;
+                                root["currentIsActive"] = packet.current_is_active;
+                                root["currentIsSchedule"] = packet.current_is_schedule;
+                                root["currentIsExternal"] = packet.current_is_external;
+                                root["currentMode"] = radiationModeToStr(packet.current_mode);
+                                root["currentBeginTime"] = packet.current_begin_time;
+                                root["currentEndTime"] = packet.current_end_time;
+                                root["currentBeamedSec"] = packet.current_beamed_sec;
+                                root["currentTotalSec"] = packet.current_total_sec;
+                                root["prevMode"] = radiationModeToStr(packet.prev_mode);
+                                root["prevBeginTime"] = packet.prev_begin_time;
+                                root["prevEndTime"] = packet.prev_end_time;
+                                root["prevBeamedSec"] = packet.prev_beamed_sec;
+                                root["prevTotalSec"] = packet.prev_total_sec;
+                                root["scheduleMode"] = radiationModeToStr(packet.schedule_mode);
+                                root["scheduleBeginTime"] = packet.schedule_begin_time;
+                                root["scheduleEndTime"] = packet.schedule_end_time;
+                                root["scheduleTotalSec"] = packet.schedule_total_sec;
+                                root["scheduleIsAborted"] = packet.schedule_is_aborted;
+                                root["nextMode"] = radiationModeToStr(packet.next_mode);
+                                root["nextBeginTime"] = packet.next_begin_time;
+                                root["nextEndTime"] = packet.next_end_time;
+                                root["nextTotalSec"] = packet.next_total_sec; });
+    }
+
+    std::string regionLayoutActionToStr(RegionLayoutAction item)
+    {
+      switch (item)
+      {
+      case RegionLayoutAction::REQUEST:
+        return "REQUEST";
+      case RegionLayoutAction::PUSH:
+        return "PUSH";
+      case RegionLayoutAction::RESPONSE:
+        return "RESPONSE";
+      default:
+        return "--unknown--";
+      }
+    }
+
+    std::string packetRegionLayoutToJsonStr(PacketRegionLayout packet)
+    {
+      return json::build_json([packet](JsonObject root)
+                              {
+                                root["mac"] = macToStr(packet.mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
+                                root["action"] = regionLayoutActionToStr(packet.action);
+                                root["udpChannel"] = packet.udp_channel;
+                                root["configVersion"] = packet.config_version;
+                                root["masterIndex"] = packet.master_index;
+                                root["memberCount"] = packet.member_count;
+                                JsonArray members = root["members"].to<JsonArray>();
+                                for (int i = 0; i < packet.member_count && i < 16; i++)
+                                {
+                                  JsonObject member = members.add<JsonObject>();
+                                  member["index"] = i;
+                                  member["model"] = storage::convertModelToStr(packet.members[i].modelNum);
+                                  member["modelNum"] = packet.members[i].modelNum;
+                                  member["mac"] = macToStr(packet.members[i].mac);
+                                  member["master"] = i == packet.master_index;
+                                } });
+    }
+
+    std::string packetRegionIntentToJsonStr(PacketRegionIntent packet)
+    {
+      return json::build_json([packet](JsonObject root)
+                              {
+                                root["originMac"] = macToStr(packet.origin_mac);
+                                root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
+                                root["sequence"] = packet.sequence;
+                                root["mode"] = radiationModeToStr(packet.mode);
+                                root["source"] = kindRadiationSourceToStr(packet.source); });
     }
   }
 }

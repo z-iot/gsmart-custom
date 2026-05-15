@@ -74,6 +74,20 @@ namespace esphome
       const std::string get_model() { return this->_model; }
       uint8_t get_model_num() { return this->_model_num; }
       const std::string get_serial() { return esphome::get_mac_address().substr(6); }
+
+      bool isScheduleAuthority() const
+      {
+#ifdef GSMART_FEATURE_REGION
+        if (this->region != nullptr && this->region->isRegionActive())
+          return this->region->isMaster();
+#endif
+        return true;
+      }
+
+      void notifySituationChange()
+      {
+        this->situation_change_callback_.call();
+      }
       
       void set_wifi_ap_active(bool active) {
         if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr) {
@@ -256,6 +270,9 @@ namespace esphome
         bool change = false;
 
 #ifdef GSMART_FEATURE_SCHEDULE
+        if (!this->isScheduleAuthority())
+          return false;
+
         int curPos = this->schedule->getCurrentScheduleItemPosition(now);
         if (curPos == -1)
         {
@@ -350,7 +367,7 @@ namespace esphome
           this->global->radiation.lastStart = nowMs;
           situation.CurrentIsActive = true;
           situation.SchIsAborted = false;
-          situation.CurrentIsExternal = source == RadiationSource::EXT;
+          situation.CurrentIsExternal = source == RadiationSource::EXT || source == RadiationSource::REGION;
           situation.BeamBeginTime = convertFromEspTimeToSituationSec(now);
           situation.BeamEndTime = convertFromEspTimeToSituationSec(now);
           situation.CurrentBeamedSec = 0;
@@ -431,12 +448,8 @@ namespace esphome
 
 #ifdef GSMART_FEATURE_SCHEDULE
         // check schedule
-        bool schedule_allowed = true;
-#ifdef GSMART_FEATURE_REGION
-        schedule_allowed = ((this->region->isRegionActive() && this->region->isMaster()) || (!this->region->isRegionActive()));
-#endif
         if (this->schedule->enabled && !situation.SchIsAborted &&
-            schedule_allowed &&
+            this->isScheduleAuthority() &&
             (this->global->radiation.activeMode == RadiationMode::OFF || (this->global->radiation.activeMode != RadiationMode::OFF && this->global->radiation.lastSource == RadiationSource::SCH)))
           return schedule->getCurrentRadiationMode(now);
 #endif

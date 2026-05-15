@@ -116,6 +116,40 @@ namespace esphome
         }
       }
 
+      int16_t memberIndexForMac(const uint8_t mac[6]) const
+      {
+        for (int i = 0; i < this->layout.memberCount; i++)
+        {
+          if (memcmp(this->layout.members[i].mac, mac, 6) == 0)
+            return i;
+        }
+        return -1;
+      }
+
+      bool isMemberMac(const uint8_t mac[6]) const
+      {
+        return this->memberIndexForMac(mac) >= 0;
+      }
+
+      bool isMasterMac(const uint8_t mac[6]) const
+      {
+        if (!this->isRegionActive() || this->layout.masterIndex >= this->layout.memberCount)
+          return false;
+        return memcmp(this->layout.members[this->layout.masterIndex].mac, mac, 6) == 0;
+      }
+
+      bool hasMembers() const
+      {
+        return this->layout.memberCount > 0;
+      }
+
+      void bumpConfigVersion()
+      {
+        this->metadata.configVersion++;
+        if (this->metadata.configVersion == 0)
+          this->metadata.configVersion = 1;
+      }
+
       void saveToJson(JsonObject &root)
       {
         root["serial"] = convertRegionSerialtoStr(this->layout.serial); // TODO
@@ -134,12 +168,12 @@ namespace esphome
         }
       }
 
-      bool isMaster()
+      bool isMaster() const
       {
         return isRegionActive() && this->selfIndex == this->layout.masterIndex;
       }
 
-      bool isRegionActive()
+      bool isRegionActive() const
       {
         return this->layout.serial != 0;
       }

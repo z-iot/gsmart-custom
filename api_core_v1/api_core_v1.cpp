@@ -99,6 +99,8 @@ std::string radiation_source_to_api(storage::RadiationSource source) {
       return "external";
     case storage::RadiationSource::SCH:
       return "scheduler";
+    case storage::RadiationSource::REGION:
+      return "region";
     case storage::RadiationSource::INT:
     default:
       return "internal";
@@ -707,6 +709,8 @@ void ApiCoreV1::build_region(JsonObject root) {
 
 bool ApiCoreV1::apply_region(JsonObject root) {
 #ifdef GSMART_FEATURE_REGION
+  const uint16_t old_udp_channel = storage::store->region->metadata.udpChannel;
+
   std::string region_id = json_string(root["regionId"]);
   if (region_id.empty())
     region_id = json_string(root["serial"]);
@@ -714,10 +718,6 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     storage::store->region->layout.serial = storage::convertRegionSerialtoNum(region_id);
 
   storage::store->region->loadMetadataFromJson(root);
-#ifdef USE_UDPSERVER
-  if (udp_server::udpServer != nullptr && storage::store->region->metadata.udpChannel != 0)
-    udp_server::udpServer->changeChannel(storage::store->region->metadata.udpChannel);
-#endif
 
   if (root["members"].is<JsonArray>()) {
     JsonDocument compact_doc;
@@ -757,19 +757,29 @@ bool ApiCoreV1::apply_region(JsonObject root) {
 
     compact["mst"] = master_index;
     storage::store->region->reloadFromJson(compact);
-#ifdef USE_UDPSERVER
-    if (udp_server::udpServer != nullptr)
-      udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
-#endif
-    return true;
   } else {
     storage::store->region->reloadFromJson(root);
-#ifdef USE_UDPSERVER
-    if (udp_server::udpServer != nullptr)
-      udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
-#endif
-    return true;
   }
+
+  storage::store->region->bumpConfigVersion();
+  storage::store->region->save();
+
+#ifdef USE_UDPSERVER
+  if (udp_server::udpServer != nullptr) {
+    if (old_udp_channel != 0 && old_udp_channel != storage::store->region->metadata.udpChannel)
+      udp_server::udpServer->sendRegionLayoutPush(false);
+    else if (old_udp_channel == 0)
+      udp_server::udpServer->sendRegionLayoutPush(true);
+
+    if (storage::store->region->metadata.udpChannel != old_udp_channel)
+      udp_server::udpServer->changeChannel(storage::store->region->metadata.udpChannel);
+
+    udp_server::udpServer->sendRegionLayoutPush(storage::store->region->metadata.udpChannel == 0);
+    udp_server::udpServer->sendSituationInfo();
+    udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
+  }
+#endif
+  return true;
 #endif
   return false;
 }
@@ -912,8 +922,9 @@ bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
     return false;
   }
 
-  storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::EXT);
-  udp_server::udpServer->sendControlRadiation(mode, udp_server::KindRadiationSource::SOURCE_EXT);
+  storage::store->setActiveRadiationMode(time(nullptr), mode, storage::RadiationSource::REGION);
+  udp_server::udpServer->sendControlRadiation(mode, udp_server::KindRadiationSource::REGION_MASTER);
+  udp_server::udpServer->sendSituationInfo();
 
   response["ok"] = true;
   response["mode"] = radiation_mode_to_api(mode);

@@ -12,6 +12,9 @@ CONF_ON_CONTROL = "on_control"
 CONF_ON_STATUS = "on_status"
 CONF_ON_IDENTITY = "on_identity"
 CONF_ON_RECONFIG = "on_reconfig"
+CONF_ON_SITUATION = "on_situation"
+CONF_ON_REGION_LAYOUT = "on_region_layout"
+CONF_ON_REGION_INTENT = "on_region_intent"
 
 CONF_ON_STATUS_FILL = "on_status_fill"
 CONF_ON_IDENTITY_FILL = "on_identity_fill"
@@ -20,6 +23,9 @@ PacketControl = udp_server_ns.struct("PacketControl")
 PacketStatus = udp_server_ns.struct("PacketStatus")
 PacketIdentity = udp_server_ns.struct("PacketIdentity")
 PacketReconfig = udp_server_ns.struct("PacketReconfig")
+PacketSituation = udp_server_ns.struct("PacketSituation")
+PacketRegionLayout = udp_server_ns.struct("PacketRegionLayout")
+PacketRegionIntent = udp_server_ns.struct("PacketRegionIntent")
 
 UdpControlNotifyTrigger = udp_server_ns.class_(
     "UdpControlNotifyTrigger", automation.Trigger.template(PacketControl)
@@ -32,6 +38,15 @@ UdpIdentityNotifyTrigger = udp_server_ns.class_(
 )
 UdpReconfigNotifyTrigger = udp_server_ns.class_(
     "UdpReconfigNotifyTrigger", automation.Trigger.template(PacketReconfig)
+)
+UdpSituationNotifyTrigger = udp_server_ns.class_(
+    "UdpSituationNotifyTrigger", automation.Trigger.template(PacketSituation)
+)
+UdpRegionLayoutNotifyTrigger = udp_server_ns.class_(
+    "UdpRegionLayoutNotifyTrigger", automation.Trigger.template(PacketRegionLayout)
+)
+UdpRegionIntentNotifyTrigger = udp_server_ns.class_(
+    "UdpRegionIntentNotifyTrigger", automation.Trigger.template(PacketRegionIntent)
 )
 
 UdpStatusFillTrigger = udp_server_ns.class_(
@@ -78,6 +93,27 @@ CONFIG_SCHEMA = cv.All(
                     ),
                 } 
             ),
+            cv.Optional(CONF_ON_SITUATION): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                        UdpSituationNotifyTrigger
+                    ),
+                }
+            ),
+            cv.Optional(CONF_ON_REGION_LAYOUT): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                        UdpRegionLayoutNotifyTrigger
+                    ),
+                }
+            ),
+            cv.Optional(CONF_ON_REGION_INTENT): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                        UdpRegionIntentNotifyTrigger
+                    ),
+                }
+            ),
 
             cv.Optional(CONF_ON_STATUS_FILL): automation.validate_automation(
                 {
@@ -117,6 +153,15 @@ async def to_code(config):
     for conf in config.get(CONF_ON_RECONFIG, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(PacketReconfig, "packet")], conf)
+    for conf in config.get(CONF_ON_SITUATION, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [(PacketSituation, "packet")], conf)
+    for conf in config.get(CONF_ON_REGION_LAYOUT, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [(PacketRegionLayout, "packet")], conf)
+    for conf in config.get(CONF_ON_REGION_INTENT, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [(PacketRegionIntent, "packet")], conf)
 
     for conf in config.get(CONF_ON_STATUS_FILL, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)

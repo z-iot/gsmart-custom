@@ -91,12 +91,19 @@ namespace esphome
       void add_on_status_callback(std::function<void(PacketStatus packet)> &&callback) { this->status_callback_.add(std::move(callback)); }
       void add_on_identity_callback(std::function<void(PacketIdentity packet)> &&callback) { this->identity_callback_.add(std::move(callback)); }
       void add_on_reconfig_callback(std::function<void(PacketReconfig packet)> &&callback) { this->reconfig_callback_.add(std::move(callback)); }
+      void add_on_situation_callback(std::function<void(PacketSituation packet)> &&callback) { this->situation_callback_.add(std::move(callback)); }
+      void add_on_region_layout_callback(std::function<void(PacketRegionLayout packet)> &&callback) { this->region_layout_callback_.add(std::move(callback)); }
+      void add_on_region_intent_callback(std::function<void(PacketRegionIntent packet)> &&callback) { this->region_intent_callback_.add(std::move(callback)); }
       void add_on_status_fill_callback(std::function<void(PacketStatus packet)> &&callback) { this->status_fill_callback_.add(std::move(callback)); }
       void add_on_identity_fill_callback(std::function<void(PacketIdentity packet)> &&callback) { this->identity_fill_callback_.add(std::move(callback)); }
 
       void sendSysInfo();
       void sendStatusInfo();
       void sendIdentityInfo();
+      void sendSituationInfo();
+      void sendRegionLayoutPush(bool main = false);
+      void sendRegionLayoutRequest();
+      void sendRegionIntent(storage::RadiationMode mode, KindRadiationSource source);
       void sendPingReq();
       void sendPingRes();
 
@@ -108,8 +115,13 @@ namespace esphome
       void sendStatus(PacketStatus packet);
       void sendIdentity(PacketIdentity packet);
       void sendReconfig(PacketReconfig packet);
+      void sendSituation(PacketSituation packet);
+      void sendRegionLayout(PacketRegionLayout packet, bool main = false);
+      void sendRegionIntent(PacketRegionIntent packet);
       PacketStatus fillStatus();
       PacketIdentity fillIdentity();
+      PacketSituation fillSituation();
+      PacketRegionLayout fillRegionLayout(RegionLayoutAction action);
 
       DeviceList GlobalDevices;
 
@@ -129,6 +141,12 @@ namespace esphome
       bool managementPacketAllowed(const PacketManagement &packet, bool main) const;
       bool targetMacMatches(const uint8_t target_mac[6]) const;
       void applyManagementPacket(const PacketManagement &packet, bool main);
+      bool packetSenderIsRegionMaster(const uint8_t mac[6]) const;
+      bool packetHasLocalMember(const PacketRegionLayout &packet) const;
+      bool packetMasterMatchesSender(const PacketRegionLayout &packet) const;
+      bool dedupeRegionIntent(const PacketRegionIntent &packet);
+      void applyRegionLayoutPacket(const PacketRegionLayout &packet);
+      void applySituationPacket(const PacketSituation &packet);
 
       IPAddress getIp(bool main);
       uint16_t getPort(bool main);
@@ -141,6 +159,9 @@ namespace esphome
       CallbackManager<void(PacketStatus packet)> status_callback_{};
       CallbackManager<void(PacketIdentity packet)> identity_callback_{};
       CallbackManager<void(PacketReconfig packet)> reconfig_callback_{};
+      CallbackManager<void(PacketSituation packet)> situation_callback_{};
+      CallbackManager<void(PacketRegionLayout packet)> region_layout_callback_{};
+      CallbackManager<void(PacketRegionIntent packet)> region_intent_callback_{};
       CallbackManager<void(PacketStatus packet)> status_fill_callback_{};
       CallbackManager<void(PacketIdentity packet)> identity_fill_callback_{};
 
@@ -149,6 +170,8 @@ namespace esphome
       uint16_t port_{30100};
       uint16_t channel_{0};
       bool wifi_connected_{false};
+      uint32_t region_intent_sequence_{0};
+      std::map<std::string, uint32_t> recent_region_intents_{};
     };
 
     // template <typename... Ts>
@@ -214,6 +237,36 @@ namespace esphome
       {
         parent->add_on_reconfig_callback([this](PacketReconfig packet)
                                          { this->trigger(packet); });
+      }
+    };
+
+    class UdpSituationNotifyTrigger : public Trigger<PacketSituation>
+    {
+    public:
+      explicit UdpSituationNotifyTrigger(UdpServer *parent)
+      {
+        parent->add_on_situation_callback([this](PacketSituation packet)
+                                         { this->trigger(packet); });
+      }
+    };
+
+    class UdpRegionLayoutNotifyTrigger : public Trigger<PacketRegionLayout>
+    {
+    public:
+      explicit UdpRegionLayoutNotifyTrigger(UdpServer *parent)
+      {
+        parent->add_on_region_layout_callback([this](PacketRegionLayout packet)
+                                             { this->trigger(packet); });
+      }
+    };
+
+    class UdpRegionIntentNotifyTrigger : public Trigger<PacketRegionIntent>
+    {
+    public:
+      explicit UdpRegionIntentNotifyTrigger(UdpServer *parent)
+      {
+        parent->add_on_region_intent_callback([this](PacketRegionIntent packet)
+                                             { this->trigger(packet); });
       }
     };
 
