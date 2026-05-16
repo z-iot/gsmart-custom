@@ -160,7 +160,9 @@ void add_wifi_runtime(JsonObject root) {
     return;
 
   root["connected"] = wifi::global_wifi_component->is_connected();
-  root["apActive"] = esphome::wifi::global_wifi_component->is_ap_active();
+  root["apActive"] = gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr
+                         ? gsmart_wifi_manager::global_gsmart_wifi_manager->is_ap_active()
+                         : esphome::wifi::global_wifi_component->is_ap_active();
   root["signal"] = wifi::global_wifi_component->wifi_rssi();
   root["channel"] = wifi::global_wifi_component->get_wifi_channel();
 
@@ -531,6 +533,7 @@ void ApiCoreV1::build_network(JsonObject root) {
 
   const auto &client = mgr->get_client_settings();
   const auto &ap = mgr->get_ap_settings();
+  const auto &service_ap_settings = mgr->get_service_ap_settings();
   const auto &cloud = mgr->get_cloud_settings();
 
   JsonObject sta = root["sta"].to<JsonObject>();
@@ -557,12 +560,19 @@ void ApiCoreV1::build_network(JsonObject root) {
   };
 
   JsonObject svc_ap_obj = soft_ap["service_ap"].to<JsonObject>();
-  svc_ap_obj["ssid"] = "Gsmart-" + get_mac_address().substr(6);
+  svc_ap_obj["ssid"] = mgr->get_service_ap_ssid();
   svc_ap_obj["password_set"] = (ap.service_ap_password[0] != 0);
   svc_ap_obj["mode"] = ap.service_ap_mode;
+  svc_ap_obj["enabled"] = ap.service_ap_mode != 0;
+  svc_ap_obj["active"] = mgr->is_service_ap_active();
+  svc_ap_obj["startup_timeout_min"] = service_ap_settings.startup_timeout_min;
+  svc_ap_obj["manual_timeout_min"] = service_ap_settings.manual_timeout_min;
+  svc_ap_obj["auto_off_scheduled"] = mgr->is_service_ap_auto_off_scheduled();
+  svc_ap_obj["auto_off_remaining_sec"] = mgr->get_service_ap_auto_off_remaining_sec();
 
   JsonObject region_ap_obj = soft_ap["region_ap"].to<JsonObject>();
   add_ap(region_ap_obj, ap.region_ap_ssid, ap.region_ap_password, ap.region_ap_mode);
+  region_ap_obj["enabled"] = ap.region_ap_mode != 0;
   region_ap_obj["channel"] = ap.region_ap_channel;
 
   JsonObject cloud_obj = root["cloud"].to<JsonObject>();
@@ -654,13 +664,33 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     JsonObject soft_ap = root["soft_ap"].as<JsonObject>();
     if (soft_ap["service_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["service_ap"].as<JsonObject>();
-      mgr->set_service_ap(json_or_current(s["password"], ap_settings.service_ap_password), s["mode"].isNull() ? ap_settings.service_ap_mode : s["mode"].as<uint8_t>());
+      uint8_t mode = ap_settings.service_ap_mode;
+      if (!s["mode"].isNull()) {
+        mode = s["mode"].as<uint8_t>();
+      } else if (!s["enabled"].isNull()) {
+        mode = json_bool(s["enabled"], false) ? 1 : 0;
+      }
+      const int32_t startup_timeout =
+          s["startup_timeout_min"].isNull() ? mgr->get_service_ap_settings().startup_timeout_min
+                                            : s["startup_timeout_min"].as<int32_t>();
+      const int32_t manual_timeout =
+          s["manual_timeout_min"].isNull() ? mgr->get_service_ap_settings().manual_timeout_min
+                                           : s["manual_timeout_min"].as<int32_t>();
+      mgr->set_service_ap_timeouts(startup_timeout, manual_timeout);
+      mgr->set_service_ap(json_or_current(s["password"], ap_settings.service_ap_password), mode);
       changed = true;
     }
     if (soft_ap["region_ap"].is<JsonObject>()) {
       JsonObject s = soft_ap["region_ap"].as<JsonObject>();
       uint8_t channel = s["channel"].isNull() ? ap_settings.region_ap_channel : s["channel"].as<uint8_t>();
-      mgr->set_region_ap(json_or_current(s["ssid"], ap_settings.region_ap_ssid), json_or_current(s["password"], ap_settings.region_ap_password), s["mode"].isNull() ? ap_settings.region_ap_mode : s["mode"].as<uint8_t>(), channel);
+      uint8_t mode = ap_settings.region_ap_mode;
+      if (!s["mode"].isNull()) {
+        mode = s["mode"].as<uint8_t>();
+      } else if (!s["enabled"].isNull()) {
+        mode = json_bool(s["enabled"], false) ? 1 : 0;
+      }
+      mgr->set_region_ap(json_or_current(s["ssid"], ap_settings.region_ap_ssid),
+                         json_or_current(s["password"], ap_settings.region_ap_password), mode, channel);
       changed = true;
     }
   }
@@ -1006,23 +1036,23 @@ void ApiCoreV1::handle_factory_reset(JsonObject root, JsonObject response) {
   if (!require_confirmation(root, response, "FACTORY_RESET"))
     return;
 
-  bool filesystem_cleared = false;
-#ifdef GSMART_FEATURE_FILESYSTEM
-  if (storage::store != nullptr && storage::store->file_system_ != nullptr)
-    filesystem_cleared = storage::store->file_system_->clearAll();
-#endif
-
-  const bool preferences_cleared = global_preferences != nullptr && global_preferences->reset();
-
   static constexpr uint32_t RESTART_DELAY_MS = 750;
-  this->set_timeout("api_control_factory_reset", RESTART_DELAY_MS, []() { App.safe_reboot(); });
+  storage::FactoryResetResult result;
+  if (storage::store != nullptr) {
+    result = storage::store->factory_reset(RESTART_DELAY_MS);
+  } else {
+    result.preferencesCleared = global_preferences != nullptr && global_preferences->reset();
+    result.rebootScheduled = true;
+    result.delayMs = RESTART_DELAY_MS;
+    this->set_timeout("api_control_factory_reset", RESTART_DELAY_MS, []() { App.safe_reboot(); });
+  }
 
   response["ok"] = true;
   response["factoryReset"] = true;
-  response["preferencesCleared"] = preferences_cleared;
-  response["filesystemCleared"] = filesystem_cleared;
-  response["rebootScheduled"] = true;
-  response["delayMs"] = RESTART_DELAY_MS;
+  response["preferencesCleared"] = result.preferencesCleared;
+  response["filesystemCleared"] = result.filesystemCleared;
+  response["rebootScheduled"] = result.rebootScheduled;
+  response["delayMs"] = result.delayMs;
 }
 
 void ApiCoreV1::handle_service_ap(JsonObject root, JsonObject response) {
@@ -1042,31 +1072,43 @@ void ApiCoreV1::handle_service_ap(JsonObject root, JsonObject response) {
   }
 
   const bool enabled = json_bool(root["enabled"], false);
+  const bool has_duration_sec = !root["durationSec"].isNull();
+  const bool has_timeout_min = !root["timeout_min"].isNull();
   uint32_t duration_sec = 0;
-  if (!root["durationSec"].isNull()) {
+  int32_t timeout_min = mgr->get_service_ap_settings().manual_timeout_min;
+  if (has_duration_sec) {
     const int32_t requested = root["durationSec"].as<int32_t>();
     duration_sec = requested > 0 ? static_cast<uint32_t>(requested) : 0;
+  } else if (has_timeout_min) {
+    timeout_min = root["timeout_min"].as<int32_t>();
+    if (timeout_min < 0) {
+      response["ok"] = false;
+      response["error"] = "invalid_timeout_min";
+      response["message"] = "timeout_min must be 0 or greater.";
+      return;
+    }
   }
 
-  this->cancel_timeout("service_ap_auto_off");
   if (enabled) {
-    mgr->set_service_ap(json_string(root["password"]), 1);
-    if (duration_sec > 0) {
-      const uint32_t delay_ms = duration_sec > 4294967UL ? 4294967295UL : duration_sec * 1000UL;
-      this->set_timeout("service_ap_auto_off", delay_ms, []() {
-        if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr)
-          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", 0);
-      });
-    }
+    if (has_duration_sec)
+      mgr->start_service_ap_for_duration(json_string(root["password"]), duration_sec);
+    else
+      mgr->start_service_ap(json_string(root["password"]), timeout_min);
   } else {
-    mgr->set_service_ap("", 0);
+    mgr->stop_service_ap();
   }
 
   response["ok"] = true;
   response["enabled"] = enabled;
-  response["durationSec"] = duration_sec;
-  response["permanent"] = enabled && duration_sec == 0;
-  response["autoOffScheduled"] = enabled && duration_sec > 0;
+  response["active"] = mgr->is_service_ap_active();
+  if (has_duration_sec)
+    response["timeout_min"] = nullptr;
+  else
+    response["timeout_min"] = timeout_min;
+  response["durationSec"] = has_duration_sec ? duration_sec : mgr->get_service_ap_auto_off_remaining_sec();
+  response["permanent"] = enabled && !mgr->is_service_ap_auto_off_scheduled();
+  response["autoOffScheduled"] = enabled && mgr->is_service_ap_auto_off_scheduled();
+  response["autoOffRemainingSec"] = mgr->get_service_ap_auto_off_remaining_sec();
 }
 
 void ApiCoreV1::handle_clear_region(JsonObject root, JsonObject response) {

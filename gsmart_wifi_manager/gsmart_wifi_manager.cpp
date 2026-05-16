@@ -2,6 +2,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/components/network/ip_address.h"
+#include "esphome/components/storage/store.h"
 
 #include <algorithm>
 #include <cstring>
@@ -22,12 +23,17 @@ static const char *const TAG = "gsmart_wifi_manager";
 static constexpr uint32_t WIFI_SETTINGS_CLIENT_PREF_ID = 99991201UL;
 static constexpr uint32_t WIFI_SETTINGS_AP_PREF_ID     = 99991202UL;
 static constexpr uint32_t WIFI_SETTINGS_CLOUD_PREF_ID  = 99991203UL;
+static constexpr uint32_t WIFI_SETTINGS_SERVICE_AP_PREF_ID = 99991204UL;
 static constexpr uint32_t WIFI_SETTINGS_MAGIC           = 0x47535746UL;  // GSWF
 static constexpr uint8_t  WIFI_SETTINGS_CLIENT_VERSION  = 2;
-static constexpr uint8_t  WIFI_SETTINGS_AP_VERSION      = 2;
+static constexpr uint8_t  WIFI_SETTINGS_AP_VERSION      = 3;
 static constexpr uint8_t  WIFI_SETTINGS_CLOUD_VERSION   = 1;
+static constexpr uint8_t  WIFI_SETTINGS_SERVICE_AP_VERSION = 1;
 static constexpr uint32_t SCAN_INTERVAL_MS = 60000UL;
 static constexpr uint32_t SCAN_POLL_TIMEOUT_MS = 12000UL;
+static constexpr int32_t SERVICE_AP_DEFAULT_TIMEOUT_MIN = 60;
+static constexpr uint32_t SERVICE_AP_MAX_AUTO_OFF_SEC = 2147483UL;
+static constexpr const char *SERVICE_AP_AUTO_OFF_TIMEOUT = "service_ap_auto_off";
 
 static constexpr const char *SERVICE_DEFAULT_SSID = "GSmartService-HS";
 static constexpr const char *SERVICE_DEFAULT_PWD  = "smart8888";
@@ -39,12 +45,15 @@ GsmartWifiManager::GsmartWifiManager() { global_gsmart_wifi_manager = this; }
 void GsmartWifiManager::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GSmart Wi-Fi Manager...");
   this->load_settings();
+  this->apply_service_ap_startup_policy_();
 #ifdef USE_WIFI_SCAN_RESULTS_LISTENERS
   if (wifi::global_wifi_component != nullptr)
     wifi::global_wifi_component->add_scan_results_listener(this);
 #endif
   this->update_sta_priority();
   this->apply_wifi_state();
+  if (this->service_ap_runtime_active_)
+    this->schedule_service_ap_auto_off_(this->timeout_min_to_seconds_(this->service_ap_settings_.startup_timeout_min));
   this->reconnect_sta_();
 }
 
@@ -65,6 +74,8 @@ void GsmartWifiManager::dump_config() {
   ESP_LOGCONFIG(TAG, "  Customer Primary SSID: %s", this->client_settings_.customer_primary_ssid);
   ESP_LOGCONFIG(TAG, "  Customer Secondary SSID: %s", this->client_settings_.customer_secondary_ssid);
   ESP_LOGCONFIG(TAG, "  Service AP: Gsmart-<serial> (%s)", this->ap_settings_.service_ap_mode ? "enabled" : "disabled");
+  ESP_LOGCONFIG(TAG, "  Service AP startup timeout: %d min", this->service_ap_settings_.startup_timeout_min);
+  ESP_LOGCONFIG(TAG, "  Service AP manual timeout: %d min", this->service_ap_settings_.manual_timeout_min);
   ESP_LOGCONFIG(TAG, "  Region AP: %s (%s, channel: %u)", this->ap_settings_.region_ap_ssid,
                 this->ap_settings_.region_ap_mode ? "enabled" : "disabled",
                 this->ap_settings_.region_ap_channel);
@@ -126,10 +137,28 @@ void GsmartWifiManager::set_sta_customer_secondary(const std::string &ssid, cons
 
 void GsmartWifiManager::set_service_ap(const std::string &password, uint8_t mode) {
   this->copy_string_(this->ap_settings_.service_ap_password, sizeof(this->ap_settings_.service_ap_password), password, true);
-  this->ap_settings_.service_ap_mode = mode;
+  this->ap_settings_.service_ap_mode = mode ? 1 : 0;
   this->save_ap_settings();
   this->update_sta_priority();
-  this->apply_wifi_state();
+  if (this->ap_settings_.service_ap_mode) {
+    this->start_service_ap("");
+  } else {
+    this->stop_service_ap();
+  }
+}
+
+void GsmartWifiManager::set_service_ap_timeouts(int32_t startup_timeout_min, int32_t manual_timeout_min) {
+  bool changed = false;
+  if (startup_timeout_min >= -1 && this->service_ap_settings_.startup_timeout_min != startup_timeout_min) {
+    this->service_ap_settings_.startup_timeout_min = startup_timeout_min;
+    changed = true;
+  }
+  if (manual_timeout_min >= 0 && this->service_ap_settings_.manual_timeout_min != manual_timeout_min) {
+    this->service_ap_settings_.manual_timeout_min = manual_timeout_min;
+    changed = true;
+  }
+  if (changed)
+    this->save_service_ap_settings();
 }
 
 void GsmartWifiManager::set_region_ap(const std::string &ssid, const std::string &password, uint8_t mode,
@@ -176,7 +205,9 @@ std::string GsmartWifiManager::get_ip_address() const {
 }
 
 std::string GsmartWifiManager::get_active_ap_profile() const {
-  if (this->ap_settings_.service_ap_mode)
+  if (!this->current_ap_enabled_)
+    return "none";
+  if (this->service_ap_runtime_active_ && this->current_ap_ssid_ == this->get_service_ap_ssid())
     return "service_ap";
   if (this->ap_settings_.region_ap_mode)
     return "region_ap";
@@ -184,6 +215,74 @@ std::string GsmartWifiManager::get_active_ap_profile() const {
 }
 
 bool GsmartWifiManager::is_ap_active() const { return this->current_ap_enabled_; }
+
+bool GsmartWifiManager::is_service_ap_active() const {
+  return this->service_ap_runtime_active_ && this->current_ap_enabled_ &&
+         this->current_ap_ssid_ == this->get_service_ap_ssid();
+}
+
+uint32_t GsmartWifiManager::get_service_ap_auto_off_remaining_sec() const {
+  if (!this->service_ap_auto_off_scheduled_)
+    return 0;
+  const uint32_t now = millis();
+  const int32_t remaining_ms = static_cast<int32_t>(this->service_ap_auto_off_at_ - now);
+  if (remaining_ms <= 0)
+    return 0;
+  return (static_cast<uint32_t>(remaining_ms) + 999UL) / 1000UL;
+}
+
+std::string GsmartWifiManager::get_service_ap_ssid() const {
+  if (storage::store != nullptr)
+    return "Gsmart-" + str_lower_case(storage::store->get_serial());
+  return "Gsmart-" + str_lower_case(get_mac_address().substr(6));
+}
+
+void GsmartWifiManager::start_service_ap(const std::string &password, int32_t timeout_min) {
+  if (!password.empty()) {
+    this->copy_string_(this->ap_settings_.service_ap_password, sizeof(this->ap_settings_.service_ap_password), password,
+                       true);
+    this->save_ap_settings();
+  }
+
+  this->service_ap_runtime_active_ = true;
+  const int32_t effective_timeout = timeout_min == SERVICE_AP_TIMEOUT_USE_DEFAULT
+                                        ? this->service_ap_settings_.manual_timeout_min
+                                        : timeout_min;
+  const int32_t safe_timeout = effective_timeout < 0 ? this->service_ap_settings_.manual_timeout_min : effective_timeout;
+  this->apply_wifi_state();
+  this->schedule_service_ap_auto_off_(this->timeout_min_to_seconds_(safe_timeout));
+}
+
+void GsmartWifiManager::start_service_ap_for_duration(const std::string &password, uint32_t duration_sec) {
+  if (!password.empty()) {
+    this->copy_string_(this->ap_settings_.service_ap_password, sizeof(this->ap_settings_.service_ap_password), password,
+                       true);
+    this->save_ap_settings();
+  }
+
+  this->service_ap_runtime_active_ = true;
+  this->apply_wifi_state();
+  this->schedule_service_ap_auto_off_(duration_sec);
+}
+
+void GsmartWifiManager::stop_service_ap() {
+  this->service_ap_runtime_active_ = false;
+  this->cancel_service_ap_auto_off_();
+  this->apply_wifi_state();
+}
+
+void GsmartWifiManager::set_service_ap_runtime(bool active) {
+  if (active)
+    this->start_service_ap("");
+  else
+    this->stop_service_ap();
+}
+
+bool GsmartWifiManager::toggle_service_ap() {
+  const bool next = !this->is_service_ap_active();
+  this->set_service_ap_runtime(next);
+  return next;
+}
 
 void GsmartWifiManager::start_scan(bool manual) {
   if (this->scan_pending_)
@@ -237,7 +336,7 @@ void GsmartWifiManager::load_settings() {
 
   this->ap_pref_ = global_preferences->make_preference<WifiSettingsAp>(WIFI_SETTINGS_AP_PREF_ID);
   if (!this->ap_pref_.load(&this->ap_settings_) || this->ap_settings_.magic != WIFI_SETTINGS_MAGIC ||
-      this->ap_settings_.version != WIFI_SETTINGS_AP_VERSION) {
+      (this->ap_settings_.version != WIFI_SETTINGS_AP_VERSION && this->ap_settings_.version != 2)) {
     ESP_LOGI(TAG, "Initializing default AP Wi-Fi settings (v%u)", WIFI_SETTINGS_AP_VERSION);
     std::memset(&this->ap_settings_, 0, sizeof(WifiSettingsAp));
     this->ap_settings_.magic = WIFI_SETTINGS_MAGIC;
@@ -249,6 +348,12 @@ void GsmartWifiManager::load_settings() {
     this->ap_settings_.region_ap_mode = 0;
     this->ap_settings_.region_ap_channel = 0;        // auto
 
+    this->save_ap_settings();
+  } else if (this->ap_settings_.version == 2) {
+    ESP_LOGI(TAG, "Migrating AP Wi-Fi settings from v2 to v%u", WIFI_SETTINGS_AP_VERSION);
+    this->ap_settings_.version = WIFI_SETTINGS_AP_VERSION;
+    this->ap_settings_.service_ap_mode = this->ap_settings_.service_ap_mode ? 1 : 0;
+    this->ap_settings_.region_ap_mode = this->ap_settings_.region_ap_mode ? 1 : 0;
     this->save_ap_settings();
   }
 
@@ -262,6 +367,32 @@ void GsmartWifiManager::load_settings() {
     this->cloud_settings_.cloud_mode = 2;            // full (backward-compatible default)
     this->save_cloud_settings();
   }
+
+  this->service_ap_pref_ =
+      global_preferences->make_preference<WifiSettingsServiceAp>(WIFI_SETTINGS_SERVICE_AP_PREF_ID);
+  if (!this->service_ap_pref_.load(&this->service_ap_settings_) ||
+      this->service_ap_settings_.magic != WIFI_SETTINGS_MAGIC ||
+      this->service_ap_settings_.version != WIFI_SETTINGS_SERVICE_AP_VERSION) {
+    ESP_LOGI(TAG, "Initializing default Service AP lifetime settings (v%u)", WIFI_SETTINGS_SERVICE_AP_VERSION);
+    std::memset(&this->service_ap_settings_, 0, sizeof(WifiSettingsServiceAp));
+    this->service_ap_settings_.magic = WIFI_SETTINGS_MAGIC;
+    this->service_ap_settings_.version = WIFI_SETTINGS_SERVICE_AP_VERSION;
+    this->service_ap_settings_.startup_timeout_min = SERVICE_AP_DEFAULT_TIMEOUT_MIN;
+    this->service_ap_settings_.manual_timeout_min = SERVICE_AP_DEFAULT_TIMEOUT_MIN;
+    this->save_service_ap_settings();
+  } else {
+    bool changed = false;
+    if (this->service_ap_settings_.startup_timeout_min < -1) {
+      this->service_ap_settings_.startup_timeout_min = -1;
+      changed = true;
+    }
+    if (this->service_ap_settings_.manual_timeout_min < 0) {
+      this->service_ap_settings_.manual_timeout_min = SERVICE_AP_DEFAULT_TIMEOUT_MIN;
+      changed = true;
+    }
+    if (changed)
+      this->save_service_ap_settings();
+  }
 }
 
 void GsmartWifiManager::save_client_settings() {
@@ -271,6 +402,11 @@ void GsmartWifiManager::save_client_settings() {
 
 void GsmartWifiManager::save_ap_settings() {
   this->ap_pref_.save(&this->ap_settings_);
+  global_preferences->sync();
+}
+
+void GsmartWifiManager::save_service_ap_settings() {
+  this->service_ap_pref_.save(&this->service_ap_settings_);
   global_preferences->sync();
 }
 
@@ -333,14 +469,21 @@ void GsmartWifiManager::update_sta_priority() {
   }
 }
 
+void GsmartWifiManager::apply_service_ap_startup_policy_() {
+  this->cancel_service_ap_auto_off_();
+  this->service_ap_runtime_active_ = this->ap_settings_.service_ap_mode != 0 &&
+                                     this->service_ap_settings_.startup_timeout_min >= 0;
+}
+
 void GsmartWifiManager::apply_wifi_state() {
   std::string ssid;
   std::string password;
   bool active = false;
   bool ap_only = false;
+  uint8_t channel = 0;
 
-  if (this->ap_settings_.service_ap_mode) {
-    ssid = "Gsmart-" + get_mac_address().substr(6);
+  if (this->service_ap_runtime_active_) {
+    ssid = this->get_service_ap_ssid();
     password = this->ap_settings_.service_ap_password;
     active = true;
   } else if (this->ap_settings_.region_ap_mode) {
@@ -348,9 +491,10 @@ void GsmartWifiManager::apply_wifi_state() {
     password = this->ap_settings_.region_ap_password;
     active = true;
     ap_only = this->client_settings_.sta_mode == 0;
+    channel = this->ap_settings_.region_ap_channel;
   }
 
-  this->apply_soft_ap_(active, ssid, password, ap_only, this->ap_settings_.region_ap_channel);
+  this->apply_soft_ap_(active, ssid, password, ap_only, channel);
   if (active)
     this->start_scan(true);
 }
@@ -493,6 +637,36 @@ bool GsmartWifiManager::should_periodic_scan_() const {
     return false;
 
   return this->current_sta_priority_() < this->highest_configured_sta_priority_();
+}
+
+uint32_t GsmartWifiManager::timeout_min_to_seconds_(int32_t timeout_min) const {
+  if (timeout_min <= 0)
+    return 0;
+  const uint32_t minutes = static_cast<uint32_t>(timeout_min);
+  return minutes > (SERVICE_AP_MAX_AUTO_OFF_SEC / 60UL) ? SERVICE_AP_MAX_AUTO_OFF_SEC : minutes * 60UL;
+}
+
+void GsmartWifiManager::schedule_service_ap_auto_off_(uint32_t duration_sec) {
+  this->cancel_service_ap_auto_off_();
+  if (!this->service_ap_runtime_active_ || duration_sec == 0)
+    return;
+
+  const uint32_t delay_ms =
+      (duration_sec > SERVICE_AP_MAX_AUTO_OFF_SEC ? SERVICE_AP_MAX_AUTO_OFF_SEC : duration_sec) * 1000UL;
+  this->service_ap_auto_off_scheduled_ = true;
+  this->service_ap_auto_off_at_ = millis() + delay_ms;
+  this->set_timeout(SERVICE_AP_AUTO_OFF_TIMEOUT, delay_ms, [this]() {
+    this->service_ap_runtime_active_ = false;
+    this->service_ap_auto_off_scheduled_ = false;
+    this->service_ap_auto_off_at_ = 0;
+    this->apply_wifi_state();
+  });
+}
+
+void GsmartWifiManager::cancel_service_ap_auto_off_() {
+  this->cancel_timeout(SERVICE_AP_AUTO_OFF_TIMEOUT);
+  this->service_ap_auto_off_scheduled_ = false;
+  this->service_ap_auto_off_at_ = 0;
 }
 
 void GsmartWifiManager::cache_scan_result_(const std::string &ssid, int8_t rssi, uint8_t channel, bool secure) {

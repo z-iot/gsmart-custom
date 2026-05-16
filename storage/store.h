@@ -47,6 +47,13 @@ namespace esphome
 {
   namespace storage
   {
+    struct FactoryResetResult
+    {
+      bool preferencesCleared{false};
+      bool filesystemCleared{false};
+      bool rebootScheduled{false};
+      uint32_t delayMs{0};
+    };
 
     class Store : public Component
     {
@@ -75,6 +82,7 @@ namespace esphome
       const std::string get_model() { return this->_model; }
       uint8_t get_model_num() { return this->_model_num; }
       const std::string get_serial() { return esphome::get_mac_address().substr(6); }
+      FactoryResetResult factory_reset(uint32_t reboot_delay_ms = 750);
 
       void setRadiationCause(RadiationCauseKind kind, const std::string &detail = "")
       {
@@ -111,7 +119,7 @@ namespace esphome
       
       void set_wifi_ap_active(bool active) {
         if (gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr) {
-          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap("", active ? 1 : 0);
+          gsmart_wifi_manager::global_gsmart_wifi_manager->set_service_ap_runtime(active);
         }
       }
 

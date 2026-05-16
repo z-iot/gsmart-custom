@@ -42,6 +42,13 @@ struct WifiSettingsAp {
   uint8_t service_ap_mode;             // 0=off, 1=on
 };
 
+struct WifiSettingsServiceAp {
+  uint32_t magic;
+  uint8_t version;
+  int32_t startup_timeout_min;          // -1=do not start on boot, 0=permanent, >0=auto-off minutes
+  int32_t manual_timeout_min;           // 0=permanent, >0=auto-off minutes
+};
+
 struct CloudSettings {
   uint32_t magic;
   uint8_t version;
@@ -60,6 +67,8 @@ struct WifiScanCacheItem {
 class GsmartWifiManager : public Component,
                           public wifi::WiFiScanResultsListener {
 public:
+  static constexpr int32_t SERVICE_AP_TIMEOUT_USE_DEFAULT = -2147483647 - 1;
+
   GsmartWifiManager();
   void setup() override;
   void loop() override;
@@ -84,6 +93,8 @@ public:
 
   // SoftAP management
   void set_service_ap(const std::string &password, uint8_t mode);
+  void set_service_ap_timeouts(int32_t startup_timeout_min, int32_t manual_timeout_min);
+  void save_service_ap_settings();
   void set_region_ap(const std::string &ssid, const std::string &password,
                      uint8_t mode, uint8_t channel);
 
@@ -98,6 +109,15 @@ public:
   std::string get_ip_address() const;
   std::string get_active_ap_profile() const;
   bool is_ap_active() const;
+  bool is_service_ap_active() const;
+  bool is_service_ap_auto_off_scheduled() const { return this->service_ap_auto_off_scheduled_; }
+  uint32_t get_service_ap_auto_off_remaining_sec() const;
+  std::string get_service_ap_ssid() const;
+  void start_service_ap(const std::string &password = "", int32_t timeout_min = SERVICE_AP_TIMEOUT_USE_DEFAULT);
+  void start_service_ap_for_duration(const std::string &password, uint32_t duration_sec);
+  void stop_service_ap();
+  void set_service_ap_runtime(bool active);
+  bool toggle_service_ap();
 
   void start_scan(bool manual = false);
   bool has_scan_results() const { return this->scan_cache_valid_; }
@@ -110,9 +130,11 @@ public:
     return client_settings_;
   }
   const WifiSettingsAp &get_ap_settings() const { return ap_settings_; }
+  const WifiSettingsServiceAp &get_service_ap_settings() const { return service_ap_settings_; }
 
 protected:
   void load_settings();
+  void apply_service_ap_startup_policy_();
   void apply_wifi_state();
   void update_sta_priority();
   void reconnect_sta_();
@@ -128,6 +150,9 @@ protected:
   uint8_t current_sta_priority_() const;
   uint8_t highest_configured_sta_priority_() const;
   bool should_periodic_scan_() const;
+  uint32_t timeout_min_to_seconds_(int32_t timeout_min) const;
+  void schedule_service_ap_auto_off_(uint32_t duration_sec);
+  void cancel_service_ap_auto_off_();
   void copy_string_(char *dest, size_t size, const std::string &value,
                     bool keep_if_empty = false);
 
@@ -135,9 +160,11 @@ protected:
   std::vector<WifiScanCacheItem> scan_cache_;
   WifiSettingsClient client_settings_;
   WifiSettingsAp ap_settings_;
+  WifiSettingsServiceAp service_ap_settings_;
   CloudSettings cloud_settings_;
   ESPPreferenceObject client_pref_;
   ESPPreferenceObject ap_pref_;
+  ESPPreferenceObject service_ap_pref_;
   ESPPreferenceObject cloud_pref_;
 
   uint32_t last_scan_time_ = 0;
@@ -148,6 +175,9 @@ protected:
   std::string current_ap_ssid_;
   std::string current_ap_password_;
   bool current_ap_enabled_ = false;
+  bool service_ap_runtime_active_ = false;
+  bool service_ap_auto_off_scheduled_ = false;
+  uint32_t service_ap_auto_off_at_ = 0;
 };
 
 extern GsmartWifiManager *global_gsmart_wifi_manager;

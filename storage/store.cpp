@@ -43,6 +43,23 @@ namespace esphome
       ESP_LOGCONFIG(TAG, "Contructing Store... done");
     };
 
+    FactoryResetResult Store::factory_reset(uint32_t reboot_delay_ms)
+    {
+      FactoryResetResult result;
+
+#ifdef GSMART_FEATURE_FILESYSTEM
+      if (this->file_system_ != nullptr)
+        result.filesystemCleared = this->file_system_->clearAll();
+#endif
+
+      result.preferencesCleared = global_preferences != nullptr && global_preferences->reset();
+      result.rebootScheduled = true;
+      result.delayMs = reboot_delay_ms;
+      this->set_timeout("store_factory_reset_reboot", reboot_delay_ms, []() { App.safe_reboot(); });
+
+      return result;
+    }
+
     void Store::loop()
     {
     }
