@@ -25,6 +25,54 @@ namespace esphome
 
     static const char *const TAG = "store";
 
+    namespace
+    {
+      bool parse_two_digits(const std::string &value, size_t offset, uint8_t &out)
+      {
+        if (offset + 1 >= value.size() || value[offset] < '0' || value[offset] > '9' ||
+            value[offset + 1] < '0' || value[offset + 1] > '9')
+          return false;
+
+        out = static_cast<uint8_t>((value[offset] - '0') * 10 + (value[offset + 1] - '0'));
+        return true;
+      }
+
+      bool parse_firmware_build_bytes(const std::string &version, uint8_t &hi, uint8_t &lo)
+      {
+        hi = 0;
+        lo = 0;
+
+        const size_t first_dot = version.find('.');
+        if (first_dot != 4)
+          return false;
+
+        uint8_t year = 0;
+        uint8_t month = 0;
+        uint8_t day = 0;
+        if (!parse_two_digits(version, 0, year) || !parse_two_digits(version, 2, month))
+          return false;
+        if (month < 1 || month > 12)
+          return false;
+
+        const size_t day_offset = first_dot + 1;
+        if (!parse_two_digits(version, day_offset, day))
+          return false;
+        if (day < 1 || day > 31)
+          return false;
+
+        if (year < 26)
+          return false;
+
+        const uint16_t month_index = static_cast<uint16_t>(year - 26) * 12 + month;
+        if (month_index == 0 || month_index > 255)
+          return false;
+
+        hi = static_cast<uint8_t>(month_index);
+        lo = day;
+        return true;
+      }
+    } // namespace
+
     Store::Store()
     {
       store = this;
@@ -58,6 +106,15 @@ namespace esphome
       this->set_timeout("store_factory_reset_reboot", reboot_delay_ms, []() { App.safe_reboot(); });
 
       return result;
+    }
+
+    void Store::getBuildNumber(uint8_t &hi, uint8_t &lo) const
+    {
+      if (!parse_firmware_build_bytes(this->_firmware_version, hi, lo))
+      {
+        hi = 0;
+        lo = 0;
+      }
     }
 
     void Store::loop()

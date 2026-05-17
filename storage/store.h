@@ -71,13 +71,12 @@ namespace esphome
         this->_model_num = convertModelToNum(model);
       }
 
-      void getBuildNumber(uint8_t &hi, uint8_t &lo)
+      void set_firmware_version(const std::string &firmware_version)
       {
-        // auto compileTime = App.get_compilation_time();
-
-        hi = 4;
-        lo = 5;
+        this->_firmware_version = firmware_version;
       }
+
+      void getBuildNumber(uint8_t &hi, uint8_t &lo) const;
 
       const std::string get_model() { return this->_model; }
       uint8_t get_model_num() { return this->_model_num; }
@@ -583,6 +582,7 @@ namespace esphome
 
     protected:
       std::string _model;
+      std::string _firmware_version;
       uint8_t _model_num;
       std::string lastSituationDuration = "";
       RadiationCause pending_radiation_cause_{};

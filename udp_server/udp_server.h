@@ -123,7 +123,9 @@ namespace esphome
       PacketSituation fillSituation();
       PacketRegionLayout fillRegionLayout(RegionLayoutAction action);
 
+#ifdef GSMART_EMITTER
       DeviceList GlobalDevices;
+#endif
 
     protected:
       std::string getModelName();

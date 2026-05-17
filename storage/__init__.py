@@ -11,6 +11,7 @@ AUTO_LOAD = ["json"]
 # DEPENDENCIES = ["wifi"]
 CODEOWNERS = ["Grid"]
 CONF_MODEL = "model"
+CONF_FIRMWARE_VERSION = "firmware_version"
 CONF_ON_SITUATION_CHANGE = "on_situation_change"
 CONF_ON_SITUATION_DURATION_CHANGE = "on_situation_duration_change"
 CONF_ON_CHANGE_RADIATION_MODE = "on_change_radiation_mode"
@@ -34,6 +35,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Store),
             cv.Required(CONF_MODEL): cv.string,
+            cv.Optional(CONF_FIRMWARE_VERSION, default=""): cv.string,
             cv.Optional(CONF_FILESYSTEM, default=False): cv.boolean,
             cv.Optional(CONF_ON_SITUATION_CHANGE): automation.validate_automation(
                 {
@@ -98,6 +100,7 @@ async def to_code(config):
     cg.add_define("USE_STORAGE")
 
     cg.add(var.set_model(config[CONF_MODEL]))
+    cg.add(var.set_firmware_version(config[CONF_FIRMWARE_VERSION]))
     
     for conf in config.get(CONF_ON_SITUATION_CHANGE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)

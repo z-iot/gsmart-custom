@@ -852,7 +852,7 @@ bool ApiCoreV1::apply_region(JsonObject root) {
 }
 
 void ApiCoreV1::build_region_devices(JsonObject root) {
-#ifdef USE_UDPSERVER
+#if defined(USE_UDPSERVER) && defined(GSMART_EMITTER)
   udp_server::udpServer->GlobalDevices.toJson(root);
 #else
   root["devices"].to<JsonArray>();
@@ -875,10 +875,11 @@ void ApiCoreV1::handle_region_ping(JsonObject root, JsonObject response) {
     response["regionId"] = root["regionId"].as<std::string>();
 
   JsonArray responses = response["responses"].to<JsonArray>();
-#ifdef USE_UDPSERVER
+#if defined(USE_UDPSERVER) && defined(GSMART_EMITTER)
   if (udp_server::udpServer != nullptr) {
     const uint32_t now = millis();
-    for (auto *item : udp_server::udpServer->GlobalDevices.Items) {
+    for (size_t i = 0; i < udp_server::udpServer->GlobalDevices.ItemsCount; i++) {
+      auto *item = udp_server::udpServer->GlobalDevices.Items[i];
       if (item == nullptr)
         continue;
 

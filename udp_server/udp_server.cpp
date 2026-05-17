@@ -42,6 +42,35 @@ namespace esphome
 {
   namespace udp_server
   {
+    namespace
+    {
+#ifdef GSMART_EMITTER
+      bool packet_ip_is_zero(const uint8_t ip[4])
+      {
+        return ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0;
+      }
+#endif
+
+      bool ip_address_is_zero(const IPAddress &ip)
+      {
+        return ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0;
+      }
+
+      void copy_ip_address(uint8_t target[4], const IPAddress &ip)
+      {
+        for (int i = 0; i < 4; i++)
+          target[i] = ip[i];
+      }
+
+      IPAddress get_sysinfo_local_ip()
+      {
+        IPAddress ip = WiFi.localIP();
+        if (!ip_address_is_zero(ip))
+          return ip;
+
+        return WiFi.softAPIP();
+      }
+    } // namespace
 
     std::string UdpServer::getModelName()
     {
@@ -335,9 +364,7 @@ namespace esphome
       PacketSysInfo packet{};
       get_mac_address_raw(packet.mac);
       packet.region_id = this->currentRegionId();
-      IPAddress ip = WiFi.localIP();
-      for (int i = 0; i < 4; i++)
-        packet.ip[i] = ip[i];
+      copy_ip_address(packet.ip, get_sysinfo_local_ip());
       packet.channel = channel_;
       packet.build[0] = 0;
       packet.build[1] = 0;
@@ -817,10 +844,14 @@ namespace esphome
       case PacketKind::SYS_INFO:
         if (packet.body.size() == sizeof(PacketSysInfo))
         {
+#ifdef GSMART_EMITTER
           auto *data = packet.body.data();
           PacketSysInfo *packetSysInfo = reinterpret_cast<PacketSysInfo *>(data);
+          if (packet_ip_is_zero(packetSysInfo->ip) && !ip_address_is_zero(remoteIP))
+            copy_ip_address(packetSysInfo->ip, remoteIP);
           auto deviceItem = this->GlobalDevices.updateFromSysInfo(packetSysInfo);
           this->neighbor_callback_.call(deviceItem);
+#endif
         }
         break;
       case PacketKind::PING_REQ:

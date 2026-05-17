@@ -3,6 +3,7 @@
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/application.h"
 #include "esphome/core/controller_registry.h"
+#include "esphome/core/entity_base.h"
 
 #ifdef USE_ESP32
 #include <esp_heap_caps.h>
@@ -45,26 +46,48 @@ namespace gsmart_esp_server {
 
 static const char *const TAG = "esp_server";
 
-#ifdef USE_LOGGER
-static std::string strip_ansi_colors(const std::string &str) {
-  std::string result;
-  result.reserve(str.size());
-  bool in_escape = false;
-  for (size_t i = 0; i < str.size(); i++) {
-    if (str[i] == '\033') {
-      in_escape = true;
-      continue;
-    }
-    if (in_escape) {
-      if (str[i] == 'm')
-        in_escape = false;
-      continue;
-    }
-    result += str[i];
-  }
-  return result;
+static bool entity_matches_(EntityBase *obj, StringRef id) {
+  if (id == obj->get_name())
+    return true;
+
+  char id_buf[128];
+  obj->write_object_id_to(id_buf, sizeof(id_buf));
+  return id == id_buf;
 }
+
+static bool request_detail_all_(WebServerRequest *request) {
+  auto *param = request->getParam("detail");
+  return param != nullptr && param->value() == "all";
+}
+
+static const char *initial_state_event_() {
+#if USE_ESP_SERVER_VERSION >= 3
+  return "state_detail_all";
+#else
+  return "state";
 #endif
+}
+
+static float param_float_(WebServerRequest *request, const char *name) {
+  return atof(request->getParam(name)->value().c_str());
+}
+
+static void set_entity_json_id_(JsonObject root, EntityBase *obj, const char *domain, bool include_metadata) {
+  char id_buf[128];
+  obj->get_object_id_to(id_buf);
+  root["id"] = std::string(domain) + "-" + std::string(id_buf);
+  root["name_id"] = std::string(domain) + "/" + obj->get_name().c_str();
+
+  if (include_metadata) {
+    root["domain"] = domain;
+    root["name"] = obj->get_name().c_str();
+    char icon_buf[64];
+    root["icon"] = obj->get_icon_to(icon_buf);
+    root["entity_category"] = (int) obj->get_entity_category();
+    if (obj->is_disabled_by_default())
+      root["is_disabled_by_default"] = true;
+  }
+}
 
 EspServer *global_esp_server = nullptr;
 
@@ -115,12 +138,20 @@ void EspServer::loop() {
 void EspServer::setup_interval() {
   this->set_interval(30000, [this]() {
 #ifdef USE_ESP32
-    const auto clients = this->events_.count();
+    const auto clients = this->events_.active_count();
 #else
     const auto clients = 0;
 #endif
     if (clients == 0)
       return;
+#ifdef USE_ESP32
+    auto uptime = static_cast<uint32_t>(millis_64() / 1000);
+    char ping_buf[128];
+    snprintf(ping_buf, sizeof(ping_buf),
+             "{\"title\":\"%s\",\"comment\":\"\",\"ota\":true,\"log\":true,\"lang\":\"en\",\"uptime\":%u}",
+             App.get_friendly_name().empty() ? App.get_name().c_str() : App.get_friendly_name().c_str(), uptime);
+    this->events_send(ping_buf, "ping", millis());
+#endif
     ESP_LOGD(TAG, "diag: sse=%zu heap=%" PRIu32 " largest=%" PRIu32 " min=%" PRIu32,
              clients, diag_heap_free(), diag_heap_largest(), diag_heap_min_free());
   });
@@ -352,12 +383,13 @@ void EspServer::close_event_sources(const char *reason) {
 
 #ifdef USE_LOGGER
 void EspServer::on_log(uint8_t level, const char *tag, const char *message, size_t message_len) {
+  (void) level;
+  (void) tag;
 #ifdef USE_ESP32
-  if (this->events_.count() == 0)
+  if (this->events_.active_count() == 0)
     return;
-  // Official ESPHome v3 dashboard expects raw message strings for logs
-  // Strip ANSI color codes to keep the UI clean
-  this->events_send(strip_ansi_colors(message).c_str(), "log", millis());
+  // The ESPHome web UI parses logger color prefixes to split level/tag/message.
+  this->events_send(std::string(message, message_len).c_str(), "log", millis());
 #endif
 }
 #endif
@@ -426,11 +458,14 @@ void EspServer::on_climate_update(climate::Climate *obj) {
 #ifdef USE_BUTTON
 void EspServer::handle_button_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_buttons()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      if (match.method == "press") obj->press();
-      auto json = this->button_json_(obj);
+    if (entity_matches_(obj, match.id)) {
+      if (match.method == "press" || match.method == "press ")
+        obj->press();
+      else if (!match.method.empty()) {
+        request->send(404);
+        return;
+      }
+      auto json = this->button_json_(obj, request_detail_all_(request));
       request->send(200, "application/json", json.c_str());
       return;
     }
@@ -441,20 +476,29 @@ void EspServer::handle_button_request(WebServerRequest *request, const ::esphome
 #ifdef USE_FAN
 void EspServer::handle_fan_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_fans()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->fan_json_(obj, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+
       auto call = obj->make_call();
       if (match.method == "toggle") call.set_state(!obj->state);
       else if (match.method == "turn_on") call.set_state(true);
       else if (match.method == "turn_off") call.set_state(false);
-      
-      if (request->hasParam("speed")) {
-        auto speed = request->getParam("speed")->value();
-        call.set_speed(speed.c_str());
+      else {
+        request->send(404);
+        return;
       }
+
+      if (request->hasParam("speed_level"))
+        call.set_speed(atoi(request->getParam("speed_level")->value().c_str()));
+      else if (request->hasParam("speed"))
+        call.set_speed(atoi(request->getParam("speed")->value().c_str()));
       if (request->hasParam("oscillation")) {
-        call.set_oscillating(request->getParam("oscillation")->value() == "true");
+        auto oscillation = request->getParam("oscillation")->value();
+        call.set_oscillating(oscillation == "true" || oscillation == "ON" || oscillation == "1");
       }
       call.perform();
       auto json = this->fan_json_(obj);
@@ -468,23 +512,32 @@ void EspServer::handle_fan_request(WebServerRequest *request, const ::esphome::U
 #ifdef USE_LIGHT
 void EspServer::handle_light_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_lights()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->light_json_(obj, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+
       auto call = obj->make_call();
       if (match.method == "toggle") call.set_state(!obj->remote_values.is_on());
       else if (match.method == "turn_on") call.set_state(true);
       else if (match.method == "turn_off") call.set_state(false);
+      else {
+        request->send(404);
+        return;
+      }
       
-      if (request->hasParam("brightness")) call.set_brightness(atof(request->getParam("brightness")->value().c_str()));
-      if (request->hasParam("color_brightness")) call.set_color_brightness(atof(request->getParam("color_brightness")->value().c_str()));
-      if (request->hasParam("r")) call.set_red(atof(request->getParam("r")->value().c_str()));
-      if (request->hasParam("red")) call.set_red(atof(request->getParam("red")->value().c_str()));
-      if (request->hasParam("g")) call.set_green(atof(request->getParam("g")->value().c_str()));
-      if (request->hasParam("green")) call.set_green(atof(request->getParam("green")->value().c_str()));
-      if (request->hasParam("b")) call.set_blue(atof(request->getParam("b")->value().c_str()));
-      if (request->hasParam("blue")) call.set_blue(atof(request->getParam("blue")->value().c_str()));
-      if (request->hasParam("white_brightness")) call.set_color_brightness(atof(request->getParam("white_brightness")->value().c_str()));
+      if (request->hasParam("brightness")) call.set_brightness(param_float_(request, "brightness") / 255.0f);
+      if (request->hasParam("color_brightness")) call.set_color_brightness(param_float_(request, "color_brightness") / 255.0f);
+      if (request->hasParam("r")) call.set_red(param_float_(request, "r") / 255.0f);
+      if (request->hasParam("red")) call.set_red(param_float_(request, "red") / 255.0f);
+      if (request->hasParam("g")) call.set_green(param_float_(request, "g") / 255.0f);
+      if (request->hasParam("green")) call.set_green(param_float_(request, "green") / 255.0f);
+      if (request->hasParam("b")) call.set_blue(param_float_(request, "b") / 255.0f);
+      if (request->hasParam("blue")) call.set_blue(param_float_(request, "blue") / 255.0f);
+      if (request->hasParam("white_value")) call.set_white(param_float_(request, "white_value") / 255.0f);
+      if (request->hasParam("white_brightness")) call.set_white(param_float_(request, "white_brightness") / 255.0f);
       if (request->hasParam("color_temp")) call.set_color_temperature(atof(request->getParam("color_temp")->value().c_str()));
       if (request->hasParam("effect")) call.set_effect(request->getParam("effect")->value().c_str());
       
@@ -500,13 +553,29 @@ void EspServer::handle_light_request(WebServerRequest *request, const ::esphome:
 #ifdef USE_COVER
 void EspServer::handle_cover_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_covers()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->cover_json_(obj, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+
       if (match.method == "open") obj->open();
       else if (match.method == "close") obj->close();
       else if (match.method == "stop") obj->stop();
-      else if (request->hasParam("pos")) obj->make_call().set_position(atof(request->getParam("pos")->value().c_str())).perform();
+      else if (match.method == "set" || request->hasParam("pos") || request->hasParam("position")) {
+        auto call = obj->make_call();
+        if (request->hasParam("pos"))
+          call.set_position(atof(request->getParam("pos")->value().c_str()));
+        if (request->hasParam("position"))
+          call.set_position(atof(request->getParam("position")->value().c_str()));
+        if (request->hasParam("tilt"))
+          call.set_tilt(atof(request->getParam("tilt")->value().c_str()));
+        call.perform();
+      } else {
+        request->send(404);
+        return;
+      }
       
       auto json = this->cover_json_(obj);
       request->send(200, "application/json", json.c_str());
@@ -519,10 +588,18 @@ void EspServer::handle_cover_request(WebServerRequest *request, const ::esphome:
 #ifdef USE_NUMBER
 void EspServer::handle_number_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_numbers()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      if (request->hasParam("value")) obj->make_call().set_value(atof(request->getParam("value")->value().c_str())).perform();
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->number_json_(obj, obj->state, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+      if (match.method != "set") {
+        request->send(404);
+        return;
+      }
+      if (request->hasParam("value"))
+        obj->make_call().set_value(atof(request->getParam("value")->value().c_str())).perform();
       auto json = this->number_json_(obj, obj->state);
       request->send(200, "application/json", json.c_str());
       return;
@@ -534,10 +611,18 @@ void EspServer::handle_number_request(WebServerRequest *request, const ::esphome
 #ifdef USE_SELECT
 void EspServer::handle_select_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_selects()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      if (request->hasParam("option")) obj->make_call().set_option(request->getParam("option")->value().c_str()).perform();
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->select_json_(obj, obj->current_option(), request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+      if (match.method != "set") {
+        request->send(404);
+        return;
+      }
+      if (request->hasParam("option"))
+        obj->make_call().set_option(request->getParam("option")->value().c_str()).perform();
       auto json = this->select_json_(obj, obj->current_option());
       request->send(200, "application/json", json.c_str());
       return;
@@ -549,12 +634,19 @@ void EspServer::handle_select_request(WebServerRequest *request, const ::esphome
 #ifdef USE_LOCK
 void EspServer::handle_lock_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_locks()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->lock_json_(obj, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
       if (match.method == "lock") obj->lock();
       else if (match.method == "unlock") obj->unlock();
       else if (match.method == "open") obj->open();
+      else {
+        request->send(404);
+        return;
+      }
 
       auto json = this->lock_json_(obj);
       request->send(200, "application/json", json.c_str());
@@ -567,9 +659,16 @@ void EspServer::handle_lock_request(WebServerRequest *request, const ::esphome::
 #ifdef USE_CLIMATE
 void EspServer::handle_climate_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_climates()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->climate_json_(obj, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
+      if (match.method != "set") {
+        request->send(404);
+        return;
+      }
       auto call = obj->make_call();
       if (request->hasParam("mode")) call.set_mode(request->getParam("mode")->value().c_str());
       if (request->hasParam("target_temperature")) call.set_target_temperature(atof(request->getParam("target_temperature")->value().c_str()));
@@ -589,15 +688,9 @@ void EspServer::handle_climate_request(WebServerRequest *request, const ::esphom
 #ifdef USE_SENSOR
 std::string EspServer::sensor_json_(sensor::Sensor *obj, float value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "sensor-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "sensor", include_metadata);
     
     if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
       if (!obj->get_unit_of_measurement_ref().empty())
         root["uom"] = obj->get_unit_of_measurement_ref();
     }
@@ -620,17 +713,7 @@ std::string EspServer::sensor_json_(sensor::Sensor *obj, float value, bool inclu
 #ifdef USE_BINARY_SENSOR
 std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, bool value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "binary_sensor-" + std::string(id_buf);
-
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
-
+    set_entity_json_id_(root, obj, "binary_sensor", include_metadata);
     root["state"] = value ? "ON" : "OFF";
     root["value"] = value;
   });
@@ -640,19 +723,11 @@ std::string EspServer::binary_sensor_json_(binary_sensor::BinarySensor *obj, boo
 #ifdef USE_SWITCH
 std::string EspServer::switch_json_(switch_::Switch *obj, bool value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "switch-" + std::string(id_buf);
-
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
-
+    set_entity_json_id_(root, obj, "switch", include_metadata);
     root["state"] = value ? "ON" : "OFF";
     root["value"] = value;
+    if (include_metadata && obj->assumed_state())
+      root["assumed_state"] = true;
   });
 }
 #endif
@@ -660,17 +735,13 @@ std::string EspServer::switch_json_(switch_::Switch *obj, bool value, bool inclu
 #ifdef USE_LIGHT
 std::string EspServer::light_json_(light::LightState *obj, bool include_metadata) {
   return json::build_json([this, obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "light-" + std::string(id_buf);
-    root["state"] = obj->remote_values.is_on() ? "ON" : "OFF";
+    set_entity_json_id_(root, obj, "light", include_metadata);
+    const char *state = obj->remote_values.is_on() ? "ON" : "OFF";
+    root["state"] = state;
+    root["value"] = state;
     light::LightJSONSchema::dump_json(*obj, root);
 
     if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
       JsonArray opt = root["effects"].to<JsonArray>();
       opt.add("None");
       for (auto const &option : obj->get_effects()) {
@@ -684,20 +755,17 @@ std::string EspServer::light_json_(light::LightState *obj, bool include_metadata
 #ifdef USE_FAN
 std::string EspServer::fan_json_(fan::Fan *obj, bool include_metadata) {
   return json::build_json([obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "fan-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "fan", include_metadata);
     root["state"] = obj->state ? "ON" : "OFF";
-    root["speed"] = (int)obj->speed;
-    if (obj->get_traits().supports_oscillation())
-      root["oscillation"] = obj->oscillating;
-
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
+    root["value"] = obj->state;
+    const auto traits = obj->get_traits();
+    if (traits.supports_speed()) {
+      root["speed"] = (int)obj->speed;
+      root["speed_level"] = obj->speed;
+      root["speed_count"] = traits.supported_speed_count();
     }
+    if (traits.supports_oscillation())
+      root["oscillation"] = obj->oscillating;
   });
 }
 #endif
@@ -705,20 +773,16 @@ std::string EspServer::fan_json_(fan::Fan *obj, bool include_metadata) {
 #ifdef USE_COVER
 std::string EspServer::cover_json_(cover::Cover *obj, bool include_metadata) {
   return json::build_json([obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "cover-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "cover", include_metadata);
     root["state"] = obj->is_fully_closed() ? "CLOSED" : "OPEN";
+    root["value"] = obj->position;
+    char operation_buf[18];
+    root["current_operation"] =
+        ESPHOME_strncpy_P(operation_buf, (ESPHOME_PGM_P) cover::cover_operation_to_str(obj->current_operation),
+                          sizeof(operation_buf) - 1);
     root["position"] = obj->position;
     if (obj->get_traits().get_supports_tilt())
       root["tilt"] = obj->tilt;
-
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
   });
 }
 #endif
@@ -726,22 +790,34 @@ std::string EspServer::cover_json_(cover::Cover *obj, bool include_metadata) {
 #ifdef USE_NUMBER
 std::string EspServer::number_json_(number::Number *obj, float value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "number-" + std::string(id_buf);
-    root["state"] = value;
-    root["value"] = value;
-    root["min"] = obj->traits.get_min_value();
-    root["max"] = obj->traits.get_max_value();
-    root["step"] = obj->traits.get_step();
+    set_entity_json_id_(root, obj, "number", include_metadata);
+    const auto uom_ref = obj->get_unit_of_measurement_ref();
+    const int8_t accuracy = step_to_accuracy_decimals(obj->traits.get_step());
+    char val_buf[64];
+    char state_buf[64];
+
+    if (std::isnan(value)) {
+      root["state"] = "NA";
+      root["value"] = "NaN";
+    } else {
+      value_accuracy_to_buf(val_buf, value, accuracy);
+      value_accuracy_with_uom_to_buf(state_buf, value, accuracy, uom_ref);
+      root["state"] = state_buf;
+      root["value"] = val_buf;
+    }
 
     if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-      if (!obj->get_unit_of_measurement_ref().empty())
-        root["uom"] = obj->get_unit_of_measurement_ref();
+      value_accuracy_to_buf(val_buf, obj->traits.get_min_value(), accuracy);
+      root["min_value"] = val_buf;
+      root["min"] = val_buf;
+      value_accuracy_to_buf(val_buf, obj->traits.get_max_value(), accuracy);
+      root["max_value"] = val_buf;
+      root["max"] = val_buf;
+      value_accuracy_to_buf(val_buf, obj->traits.get_step(), accuracy);
+      root["step"] = val_buf;
+      root["mode"] = (int) obj->traits.get_mode();
+      if (!uom_ref.empty())
+        root["uom"] = uom_ref.c_str();
     }
   });
 }
@@ -750,15 +826,7 @@ std::string EspServer::number_json_(number::Number *obj, float value, bool inclu
 #ifdef USE_BUTTON
 std::string EspServer::button_json_(button::Button *obj, bool include_metadata) {
   return json::build_json([obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "button-" + std::string(id_buf);
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
+    set_entity_json_id_(root, obj, "button", include_metadata);
   });
 }
 #endif
@@ -766,19 +834,17 @@ std::string EspServer::button_json_(button::Button *obj, bool include_metadata) 
 #ifdef USE_SELECT
 std::string EspServer::select_json_(select::Select *obj, const std::string &value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "select-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "select", include_metadata);
     root["state"] = value;
     root["value"] = value;
     if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-      JsonArray options = root["options"].to<JsonArray>();
+      JsonArray options = root["option"].to<JsonArray>();
       for (auto const &option : obj->traits.get_options()) {
         options.add(option);
+      }
+      JsonArray legacy_options = root["options"].to<JsonArray>();
+      for (auto const &option : obj->traits.get_options()) {
+        legacy_options.add(option);
       }
     }
   });
@@ -788,17 +854,7 @@ std::string EspServer::select_json_(select::Select *obj, const std::string &valu
 #ifdef USE_TEXT_SENSOR
 std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value, bool include_metadata) {
   return json::build_json([obj, value, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "text_sensor-" + std::string(id_buf);
-
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
-
+    set_entity_json_id_(root, obj, "text_sensor", include_metadata);
     root["state"] = value;
     root["value"] = value;
   });
@@ -808,9 +864,7 @@ std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std
 #ifdef USE_CLIMATE
 std::string EspServer::climate_json_(climate::Climate *obj, bool include_metadata) {
   return json::build_json([obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "climate-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "climate", include_metadata);
     root["state"] = climate::climate_mode_to_string(obj->mode);
     root["mode"] = climate::climate_mode_to_string(obj->mode);
     root["current_temperature"] = obj->current_temperature;
@@ -829,11 +883,6 @@ std::string EspServer::climate_json_(climate::Climate *obj, bool include_metadat
       root["action"] = climate::climate_action_to_string(obj->action);
 
     if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-      
       auto traits = obj->get_traits();
       JsonArray modes = root.createNestedArray("modes");
       for (auto mode : traits.get_supported_modes())
@@ -857,17 +906,8 @@ std::string EspServer::climate_json_(climate::Climate *obj, bool include_metadat
 #ifdef USE_LOCK
 std::string EspServer::lock_json_(lock::Lock *obj, bool include_metadata) {
   return json::build_json([obj, include_metadata](JsonObject root) {
-    char id_buf[128];
-    obj->get_object_id_to(id_buf);
-    root["id"] = "lock-" + std::string(id_buf);
+    set_entity_json_id_(root, obj, "lock", include_metadata);
     root["state"] = lock::lock_state_to_string(obj->state);
-    
-    if (include_metadata) {
-      root["name"] = obj->get_name();
-      char icon_buf[64];
-      root["icon"] = obj->get_icon_to(icon_buf);
-      root["entity_category"] = (int)obj->get_entity_category();
-    }
   });
 }
 #endif
@@ -875,13 +915,8 @@ std::string EspServer::lock_json_(lock::Lock *obj, bool include_metadata) {
 #ifdef USE_SENSOR
 void EspServer::handle_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_sensors()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      bool detail_all = false;
-      auto *param = request->getParam("detail");
-      if (param != nullptr && param->value() == "all")
-        detail_all = true;
+    if (entity_matches_(obj, match.id)) {
+      bool detail_all = request_detail_all_(request);
       auto json = this->sensor_json_(obj, obj->state, detail_all);
       request->send(200, "application/json", json.c_str());
       return;
@@ -894,12 +929,19 @@ void EspServer::handle_sensor_request(WebServerRequest *request, const ::esphome
 #ifdef USE_SWITCH
 void EspServer::handle_switch_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_switches()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
+    if (entity_matches_(obj, match.id)) {
+      if (match.method.empty()) {
+        auto json = this->switch_json_(obj, obj->state, request_detail_all_(request));
+        request->send(200, "application/json", json.c_str());
+        return;
+      }
       if (match.method == "toggle") obj->toggle();
       else if (match.method == "turn_on") obj->turn_on();
       else if (match.method == "turn_off") obj->turn_off();
+      else {
+        request->send(404);
+        return;
+      }
       
       auto json = this->switch_json_(obj, obj->state);
       request->send(200, "application/json", json.c_str());
@@ -913,13 +955,8 @@ void EspServer::handle_switch_request(WebServerRequest *request, const ::esphome
 #ifdef USE_BINARY_SENSOR
 void EspServer::handle_binary_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_binary_sensors()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      bool detail_all = false;
-      auto *param = request->getParam("detail");
-      if (param != nullptr && param->value() == "all")
-        detail_all = true;
+    if (entity_matches_(obj, match.id)) {
+      bool detail_all = request_detail_all_(request);
       auto json = this->binary_sensor_json_(obj, obj->state, detail_all);
       request->send(200, "application/json", json.c_str());
       return;
@@ -932,13 +969,8 @@ void EspServer::handle_binary_sensor_request(WebServerRequest *request, const ::
 #ifdef USE_TEXT_SENSOR
 void EspServer::handle_text_sensor_request(WebServerRequest *request, const ::esphome::UrlMatch &match) {
   for (auto *obj : App.get_text_sensors()) {
-    char id_buf[128];
-    obj->write_object_id_to(id_buf, sizeof(id_buf));
-    if (std::string(id_buf) == match.id.c_str()) {
-      bool detail_all = false;
-      auto *param = request->getParam("detail");
-      if (param != nullptr && param->value() == "all")
-        detail_all = true;
+    if (entity_matches_(obj, match.id)) {
+      bool detail_all = request_detail_all_(request);
       auto json = this->text_sensor_json_(obj, obj->state, detail_all);
       request->send(200, "application/json", json.c_str());
       return;
@@ -952,7 +984,7 @@ void EspServer::handle_text_sensor_request(WebServerRequest *request, const ::es
 bool EspServer::on_binary_sensor(binary_sensor::BinarySensor *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->binary_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  this->events_send(this->binary_sensor_json_(obj, obj->state, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -960,7 +992,7 @@ bool EspServer::on_binary_sensor(binary_sensor::BinarySensor *obj) {
 bool EspServer::on_light(light::LightState *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 4096) return false;
-  this->events_send(this->light_json_(obj, true).c_str(), "state", millis());
+  this->events_send(this->light_json_(obj, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -968,7 +1000,7 @@ bool EspServer::on_light(light::LightState *obj) {
 bool EspServer::on_fan(fan::Fan *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 4096) return false;
-  this->events_send(this->fan_json_(obj, true).c_str(), "state", millis());
+  this->events_send(this->fan_json_(obj, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -976,7 +1008,7 @@ bool EspServer::on_fan(fan::Fan *obj) {
 bool EspServer::on_cover(cover::Cover *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 4096) return false;
-  this->events_send(this->cover_json_(obj, true).c_str(), "state", millis());
+  this->events_send(this->cover_json_(obj, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -984,7 +1016,7 @@ bool EspServer::on_cover(cover::Cover *obj) {
 bool EspServer::on_sensor(sensor::Sensor *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  this->events_send(this->sensor_json_(obj, obj->state, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -992,18 +1024,23 @@ bool EspServer::on_sensor(sensor::Sensor *obj) {
 bool EspServer::on_switch(switch_::Switch *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->switch_json_(obj, obj->state, true).c_str(), "state", millis());
+  this->events_send(this->switch_json_(obj, obj->state, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
 #ifdef USE_BUTTON
-bool EspServer::on_button(button::Button *obj) { return true; }
+bool EspServer::on_button(button::Button *obj) {
+  if (this->events_.count() == 0) return true;
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->button_json_(obj, true).c_str(), initial_state_event_(), millis());
+  return true;
+}
 #endif
 #ifdef USE_TEXT_SENSOR
 bool EspServer::on_text_sensor(text_sensor::TextSensor *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->text_sensor_json_(obj, obj->state, true).c_str(), "state", millis());
+  this->events_send(this->text_sensor_json_(obj, obj->state, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -1011,7 +1048,7 @@ bool EspServer::on_text_sensor(text_sensor::TextSensor *obj) {
 bool EspServer::on_climate(climate::Climate *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 4096) return false;
-  this->events_send(this->climate_json_(obj, true).c_str(), "state", millis());
+  this->events_send(this->climate_json_(obj, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -1019,7 +1056,7 @@ bool EspServer::on_climate(climate::Climate *obj) {
 bool EspServer::on_number(number::Number *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->number_json_(obj, obj->state, true).c_str(), "state", millis());
+  this->events_send(this->number_json_(obj, obj->state, true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -1027,7 +1064,7 @@ bool EspServer::on_number(number::Number *obj) {
 bool EspServer::on_select(select::Select *obj) {
   if (this->events_.count() == 0) return true;
   if (this->events_buffered_bytes() > 2048) return false;
-  this->events_send(this->select_json_(obj, obj->current_option(), true).c_str(), "state", millis());
+  this->events_send(this->select_json_(obj, obj->current_option(), true).c_str(), initial_state_event_(), millis());
   return true;
 }
 #endif
@@ -1048,7 +1085,12 @@ bool EspServer::on_text(text::Text *obj) { return true; }
 // Duplicate on_select removed
 #endif
 #ifdef USE_LOCK
-bool EspServer::on_lock(lock::Lock *obj) { return true; }
+bool EspServer::on_lock(lock::Lock *obj) {
+  if (this->events_.count() == 0) return true;
+  if (this->events_buffered_bytes() > 2048) return false;
+  this->events_send(this->lock_json_(obj, true).c_str(), initial_state_event_(), millis());
+  return true;
+}
 #endif
 #ifdef USE_VALVE
 bool EspServer::on_valve(valve::Valve *obj) { return true; }
