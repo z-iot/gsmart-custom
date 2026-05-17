@@ -248,7 +248,12 @@ namespace esphome
       {
         SituationInfo &situation = this->global->situation;
         if (situation.CurrentIsActive)
-          return convertSituationSecToTimeStr(situation.CurrentBeginTime) + " - " + convertSituationSecToTimeStr(situation.CurrentEndTime);
+        {
+          std::string begin_time = convertSituationSecToTimeStr(situation.CurrentBeginTime);
+          if (situation.CurrentMode == RadiationMode::ON)
+            return begin_time + " - ";
+          return begin_time + " - " + convertSituationSecToTimeStr(situation.CurrentEndTime);
+        }
         return "";
       }
 
