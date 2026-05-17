@@ -139,6 +139,7 @@ void ApiAdapterRest::setup() {
   };
 
   register_routes("/api/g-node/" + this->core_->get_version_path());
+  register_routes("/api/mobile/" + this->core_->get_version_path());
 
   // Legacy aliases kept temporarily for existing tools while the app migrates
   // to /api/g-node/v1.

@@ -28,10 +28,12 @@ static constexpr uint32_t WIFI_SETTINGS_MAGIC           = 0x47535746UL;  // GSWF
 static constexpr uint8_t  WIFI_SETTINGS_CLIENT_VERSION  = 2;
 static constexpr uint8_t  WIFI_SETTINGS_AP_VERSION      = 3;
 static constexpr uint8_t  WIFI_SETTINGS_CLOUD_VERSION   = 1;
-static constexpr uint8_t  WIFI_SETTINGS_SERVICE_AP_VERSION = 1;
+static constexpr uint8_t  WIFI_SETTINGS_SERVICE_AP_VERSION = 2;
 static constexpr uint32_t SCAN_INTERVAL_MS = 60000UL;
 static constexpr uint32_t SCAN_POLL_TIMEOUT_MS = 12000UL;
-static constexpr int32_t SERVICE_AP_DEFAULT_TIMEOUT_MIN = 60;
+static constexpr uint32_t SOFT_AP_REAPPLY_INTERVAL_MS = 5000UL;
+static constexpr int32_t SERVICE_AP_OLD_DEFAULT_TIMEOUT_MIN = 60;
+static constexpr int32_t SERVICE_AP_DEFAULT_TIMEOUT_MIN = 15;
 static constexpr uint32_t SERVICE_AP_MAX_AUTO_OFF_SEC = 2147483UL;
 static constexpr const char *SERVICE_AP_AUTO_OFF_TIMEOUT = "service_ap_auto_off";
 
@@ -65,6 +67,8 @@ void GsmartWifiManager::loop() {
 
   if (this->scan_pending_)
     this->check_scan_results();
+
+  this->ensure_soft_ap_state_();
 }
 
 void GsmartWifiManager::dump_config() {
@@ -205,7 +209,7 @@ std::string GsmartWifiManager::get_ip_address() const {
 }
 
 std::string GsmartWifiManager::get_active_ap_profile() const {
-  if (!this->current_ap_enabled_)
+  if (!this->current_ap_enabled_ || !this->soft_ap_matches_expected_())
     return "none";
   if (this->service_ap_runtime_active_ && this->current_ap_ssid_ == this->get_service_ap_ssid())
     return "service_ap";
@@ -214,11 +218,11 @@ std::string GsmartWifiManager::get_active_ap_profile() const {
   return "none";
 }
 
-bool GsmartWifiManager::is_ap_active() const { return this->current_ap_enabled_; }
+bool GsmartWifiManager::is_ap_active() const { return this->current_ap_enabled_ && this->is_soft_ap_running_(); }
 
 bool GsmartWifiManager::is_service_ap_active() const {
-  return this->service_ap_runtime_active_ && this->current_ap_enabled_ &&
-         this->current_ap_ssid_ == this->get_service_ap_ssid();
+  return this->service_ap_runtime_active_ && this->is_ap_active() &&
+         this->get_soft_ap_runtime_ssid_() == this->get_service_ap_ssid();
 }
 
 uint32_t GsmartWifiManager::get_service_ap_auto_off_remaining_sec() const {
@@ -372,7 +376,8 @@ void GsmartWifiManager::load_settings() {
       global_preferences->make_preference<WifiSettingsServiceAp>(WIFI_SETTINGS_SERVICE_AP_PREF_ID);
   if (!this->service_ap_pref_.load(&this->service_ap_settings_) ||
       this->service_ap_settings_.magic != WIFI_SETTINGS_MAGIC ||
-      this->service_ap_settings_.version != WIFI_SETTINGS_SERVICE_AP_VERSION) {
+      (this->service_ap_settings_.version != WIFI_SETTINGS_SERVICE_AP_VERSION &&
+       this->service_ap_settings_.version != 1)) {
     ESP_LOGI(TAG, "Initializing default Service AP lifetime settings (v%u)", WIFI_SETTINGS_SERVICE_AP_VERSION);
     std::memset(&this->service_ap_settings_, 0, sizeof(WifiSettingsServiceAp));
     this->service_ap_settings_.magic = WIFI_SETTINGS_MAGIC;
@@ -382,6 +387,14 @@ void GsmartWifiManager::load_settings() {
     this->save_service_ap_settings();
   } else {
     bool changed = false;
+    if (this->service_ap_settings_.version == 1) {
+      this->service_ap_settings_.version = WIFI_SETTINGS_SERVICE_AP_VERSION;
+      if (this->service_ap_settings_.startup_timeout_min == SERVICE_AP_OLD_DEFAULT_TIMEOUT_MIN)
+        this->service_ap_settings_.startup_timeout_min = SERVICE_AP_DEFAULT_TIMEOUT_MIN;
+      if (this->service_ap_settings_.manual_timeout_min == SERVICE_AP_OLD_DEFAULT_TIMEOUT_MIN)
+        this->service_ap_settings_.manual_timeout_min = SERVICE_AP_DEFAULT_TIMEOUT_MIN;
+      changed = true;
+    }
     if (this->service_ap_settings_.startup_timeout_min < -1) {
       this->service_ap_settings_.startup_timeout_min = -1;
       changed = true;
@@ -471,8 +484,12 @@ void GsmartWifiManager::update_sta_priority() {
 
 void GsmartWifiManager::apply_service_ap_startup_policy_() {
   this->cancel_service_ap_auto_off_();
+  const bool has_customer_wifi = this->client_settings_.customer_primary_ssid[0] != '\0' ||
+                                 this->client_settings_.customer_secondary_ssid[0] != '\0';
+  const bool region_ap_enabled = this->ap_settings_.region_ap_mode != 0;
   this->service_ap_runtime_active_ = this->ap_settings_.service_ap_mode != 0 &&
-                                     this->service_ap_settings_.startup_timeout_min >= 0;
+                                     this->service_ap_settings_.startup_timeout_min >= 0 &&
+                                     !has_customer_wifi && !region_ap_enabled;
 }
 
 void GsmartWifiManager::apply_wifi_state() {
@@ -637,6 +654,61 @@ bool GsmartWifiManager::should_periodic_scan_() const {
     return false;
 
   return this->current_sta_priority_() < this->highest_configured_sta_priority_();
+}
+
+bool GsmartWifiManager::is_soft_ap_running_() const {
+#ifdef USE_ESP32
+  wifi_mode_t mode = WIFI_MODE_NULL;
+  if (esp_wifi_get_mode(&mode) != ESP_OK)
+    return false;
+  return mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA;
+#elif defined(USE_ESP8266)
+  WiFiMode_t mode = WiFi.getMode();
+  return mode == WIFI_AP || mode == WIFI_AP_STA;
+#else
+  return this->current_ap_enabled_;
+#endif
+}
+
+std::string GsmartWifiManager::get_soft_ap_runtime_ssid_() const {
+#ifdef USE_ESP32
+  if (!this->is_soft_ap_running_())
+    return "";
+  wifi_config_t conf = {};
+  if (esp_wifi_get_config(WIFI_IF_AP, &conf) != ESP_OK)
+    return "";
+  size_t len = conf.ap.ssid_len;
+  if (len == 0)
+    len = strnlen(reinterpret_cast<const char *>(conf.ap.ssid), sizeof(conf.ap.ssid));
+  return std::string(reinterpret_cast<const char *>(conf.ap.ssid), std::min<size_t>(len, sizeof(conf.ap.ssid)));
+#elif defined(USE_ESP8266)
+  if (!this->is_soft_ap_running_())
+    return "";
+  return WiFi.softAPSSID().c_str();
+#else
+  return this->current_ap_ssid_;
+#endif
+}
+
+bool GsmartWifiManager::soft_ap_matches_expected_() const {
+  if (!this->current_ap_enabled_)
+    return true;
+  if (!this->is_soft_ap_running_())
+    return false;
+  return this->get_soft_ap_runtime_ssid_() == this->current_ap_ssid_;
+}
+
+void GsmartWifiManager::ensure_soft_ap_state_() {
+  if (!this->current_ap_enabled_ || this->soft_ap_matches_expected_())
+    return;
+
+  const uint32_t now = millis();
+  if (now - this->last_soft_ap_reapply_ms_ < SOFT_AP_REAPPLY_INTERVAL_MS)
+    return;
+  this->last_soft_ap_reapply_ms_ = now;
+
+  ESP_LOGW(TAG, "SoftAP runtime state does not match requested state; reapplying AP configuration");
+  this->apply_wifi_state();
 }
 
 uint32_t GsmartWifiManager::timeout_min_to_seconds_(int32_t timeout_min) const {

@@ -150,6 +150,10 @@ protected:
   uint8_t current_sta_priority_() const;
   uint8_t highest_configured_sta_priority_() const;
   bool should_periodic_scan_() const;
+  bool is_soft_ap_running_() const;
+  std::string get_soft_ap_runtime_ssid_() const;
+  bool soft_ap_matches_expected_() const;
+  void ensure_soft_ap_state_();
   uint32_t timeout_min_to_seconds_(int32_t timeout_min) const;
   void schedule_service_ap_auto_off_(uint32_t duration_sec);
   void cancel_service_ap_auto_off_();
@@ -178,6 +182,7 @@ protected:
   bool service_ap_runtime_active_ = false;
   bool service_ap_auto_off_scheduled_ = false;
   uint32_t service_ap_auto_off_at_ = 0;
+  uint32_t last_soft_ap_reapply_ms_ = 0;
 };
 
 extern GsmartWifiManager *global_gsmart_wifi_manager;
