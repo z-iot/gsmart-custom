@@ -12,6 +12,8 @@
 #endif
 
 #include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
+#include <algorithm>
+#include <cctype>
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -327,7 +329,7 @@ void add_error_status(JsonObject root) {
 
 }  // namespace
 
-std::string ApiCoreV1::get_build_string_() const {
+std::string ApiCoreV1::get_build_code_() const {
   if (storage::store == nullptr)
     return "";
 
@@ -341,7 +343,23 @@ std::string ApiCoreV1::get_firmware_version_() const {
   if (!this->firmware_version_.empty())
     return this->firmware_version_;
 
-  return this->get_build_string_();
+  return this->get_build_code_();
+}
+
+std::string ApiCoreV1::get_device_name_() const {
+  std::string model = storage::store->get_model();
+  if (!model.empty())
+    model[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(model[0])));
+
+  std::string serial = storage::store->get_serial();
+  std::transform(serial.begin(), serial.end(), serial.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+
+  if (model.empty())
+    return serial;
+  if (serial.empty())
+    return model;
+  return model + "-" + serial;
 }
 
 void ApiCoreV1::sync_preferences_now_() const {
@@ -353,7 +371,7 @@ void ApiCoreV1::build_info(JsonObject root) {
   uint8_t mac[6];
   get_mac_address_raw(mac);
 
-  const std::string build = this->get_build_string_();
+  const std::string build = this->get_build_code_();
   const std::string firmware_version = this->get_firmware_version_();
 
   root["api"] = "g-node.v1";
@@ -361,13 +379,14 @@ void ApiCoreV1::build_info(JsonObject root) {
   root["modelNum"] = storage::store->get_model_num();
   root["serial"] = storage::store->get_serial();
   root["mac"] = storage::convertMacToStr(mac);
-  root["name"] = std::string("G-Smart-") + storage::store->get_serial();
+  root["name"] = this->get_device_name_();
+  root["fwr"] = firmware_version;
   root["fw"] = firmware_version;
   root["fwver"] = firmware_version;
-  root["fwVersion"] = firmware_version;
   root["build"] = build;
 
   JsonObject firmware = root["firmware"].to<JsonObject>();
+  firmware["fwr"] = firmware_version;
   firmware["build"] = build;
   firmware["version"] = firmware_version;
 
@@ -432,7 +451,7 @@ void ApiCoreV1::build_status(JsonObject root) {
 }
 
 void ApiCoreV1::build_diagnostics(JsonObject root) {
-  const std::string build = this->get_build_string_();
+  const std::string build = this->get_build_code_();
   const std::string firmware_version = this->get_firmware_version_();
 
   root["model"] = storage::store->get_model();
@@ -451,6 +470,7 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
 #endif
 
   JsonObject diagnostics_firmware = root["firmware"].to<JsonObject>();
+  diagnostics_firmware["fwr"] = firmware_version;
   diagnostics_firmware["build"] = build;
   diagnostics_firmware["version"] = firmware_version;
 #ifdef ESP32

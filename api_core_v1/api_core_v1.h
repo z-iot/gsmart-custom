@@ -75,8 +75,9 @@ class ApiCoreV1 : public Component {
   CallbackManager<void(IdentifyRequest)> *get_identify_callback() { return &this->identify_callback_; }
 
  protected:
-  std::string get_build_string_() const;
+  std::string get_build_code_() const;
   std::string get_firmware_version_() const;
+  std::string get_device_name_() const;
   void sync_preferences_now_() const;
 
   CallbackManager<void(IdentifyRequest)> identify_callback_{};
