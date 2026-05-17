@@ -152,7 +152,7 @@ void EspServer::setup_interval() {
              App.get_friendly_name().empty() ? App.get_name().c_str() : App.get_friendly_name().c_str(), uptime);
     this->events_send(ping_buf, "ping", millis());
 #endif
-    ESP_LOGD(TAG, "diag: sse=%zu heap=%" PRIu32 " largest=%" PRIu32 " min=%" PRIu32,
+    ESP_LOGV(TAG, "diag: sse=%zu heap=%" PRIu32 " largest=%" PRIu32 " min=%" PRIu32,
              clients, diag_heap_free(), diag_heap_largest(), diag_heap_min_free());
   });
 
@@ -219,6 +219,10 @@ void EspServer::setup_interval() {
 void EspServer::dump_config() { ESP_LOGCONFIG(TAG, "EspServer Addon:"); }
 
 float EspServer::get_setup_priority() const { return setup_priority::WIFI - 1.0f; }
+
+bool EspServer::should_expose_entity_(EntityBase *obj) const {
+  return this->include_internal_ || !obj->is_internal();
+}
 
 #ifdef USE_SENSOR
 #endif
@@ -396,55 +400,55 @@ void EspServer::on_log(uint8_t level, const char *tag, const char *message, size
 
 #ifdef USE_SENSOR
 void EspServer::on_sensor_update(sensor::Sensor *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_BINARY_SENSOR
 void EspServer::on_binary_sensor_update(binary_sensor::BinarySensor *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->binary_sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_SWITCH
 void EspServer::on_switch_update(switch_::Switch *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->switch_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_TEXT_SENSOR
 void EspServer::on_text_sensor_update(text_sensor::TextSensor *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->text_sensor_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_LIGHT
 void EspServer::on_light_update(light::LightState *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->light_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_FAN
 void EspServer::on_fan_update(fan::Fan *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->fan_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_COVER
 void EspServer::on_cover_update(cover::Cover *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->cover_json_(obj).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_NUMBER
 void EspServer::on_number_update(number::Number *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->number_json_(obj, obj->state).c_str(), "state", millis());
 }
 #endif
 #ifdef USE_SELECT
 void EspServer::on_select_update(select::Select *obj) {
-  if (this->events_.count() == 0) return;
+  if (this->events_.count() == 0 || !this->should_expose_entity_(obj)) return;
   this->events_send(this->select_json_(obj, obj->current_option()).c_str(), "state", millis());
 }
 #endif
@@ -853,10 +857,20 @@ std::string EspServer::select_json_(select::Select *obj, const std::string &valu
 
 #ifdef USE_TEXT_SENSOR
 std::string EspServer::text_sensor_json_(text_sensor::TextSensor *obj, const std::string &value, bool include_metadata) {
-  return json::build_json([obj, value, include_metadata](JsonObject root) {
+  static constexpr size_t MAX_INTERNAL_TEXT_STATE_LENGTH = 64;
+  std::string display_value = value;
+  const bool truncate = obj->is_internal() && display_value.size() > MAX_INTERNAL_TEXT_STATE_LENGTH;
+  if (truncate) {
+    display_value.resize(MAX_INTERNAL_TEXT_STATE_LENGTH);
+    display_value += "...";
+  }
+
+  return json::build_json([obj, display_value, include_metadata, truncate](JsonObject root) {
     set_entity_json_id_(root, obj, "text_sensor", include_metadata);
-    root["state"] = value;
-    root["value"] = value;
+    root["state"] = display_value;
+    root["value"] = display_value;
+    if (include_metadata && truncate)
+      root["truncated"] = true;
   });
 }
 #endif

@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/entity_base.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 #ifdef USE_ESP32
 #include "esphome/components/web_server_idf/web_server_idf.h"
@@ -238,6 +239,7 @@ class EspServer : public Component, public WebHandler, public ::esphome::Control
 
   void events_send(const char *message, const char *event = nullptr, uint32_t id = 0);
   size_t events_buffered_bytes();
+  bool should_expose_entity_(EntityBase *obj) const;
 
   WebEventSource events_;
   bool include_internal_{false};
