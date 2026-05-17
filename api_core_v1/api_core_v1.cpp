@@ -204,6 +204,18 @@ void add_situation(JsonObject root) {
   root["nextTotalSec"] = situation.NextTotalSec;
 }
 
+void add_region_runtime(JsonObject root) {
+  const auto active_mode = storage::store->global->radiation.activeMode;
+  auto &situation = storage::store->global->situation;
+
+  root["mode"] = radiation_mode_to_api(active_mode);
+  root["radiate"] = active_mode != storage::RadiationMode::OFF;
+  root["source"] = radiation_source_to_api(storage::store->global->radiation.lastSource);
+  root["remainingSec"] = storage::store->getTimerDurationSec(time(nullptr));
+  root["currentMode"] = radiation_mode_to_api(situation.CurrentMode);
+  root["currentIsActive"] = situation.CurrentIsActive;
+}
+
 void add_lamps_status(JsonObject root) {
   root["lampState"] = false;
   root["lampStateA"] = false;
@@ -410,6 +422,7 @@ void ApiCoreV1::build_status(JsonObject root) {
   region["selfIndex"] = storage::store->region->selfIndex;
   region["masterIndex"] = storage::store->region->layout.masterIndex;
   region["udpChannel"] = storage::store->region->metadata.udpChannel;
+  add_region_runtime(region);
 #endif
 }
 
@@ -735,6 +748,7 @@ void ApiCoreV1::build_region(JsonObject root) {
   root["selfIndex"] = storage::store->region->selfIndex;
   root["isMaster"] = storage::store->region->isMaster();
   root["active"] = storage::store->region->isRegionActive();
+  add_region_runtime(root);
 
   JsonArray members = root["members"].to<JsonArray>();
   for (int i = 0; i < storage::store->region->layout.memberCount; i++) {
@@ -980,6 +994,11 @@ bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
   response["sent"] = true;
   response["master"] = true;
   response["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+  JsonObject region = response["region"].to<JsonObject>();
+  region["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+  region["active"] = storage::store->region->isRegionActive();
+  region["isMaster"] = true;
+  add_region_runtime(region);
   return true;
 #endif
 }
