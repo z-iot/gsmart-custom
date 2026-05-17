@@ -166,6 +166,8 @@ void add_wifi_runtime(JsonObject root) {
   root["apActive"] = gsmart_wifi_manager::global_gsmart_wifi_manager != nullptr
                          ? gsmart_wifi_manager::global_gsmart_wifi_manager->is_ap_active()
                          : esphome::wifi::global_wifi_component->is_ap_active();
+  char ssid_buf[wifi::SSID_BUFFER_SIZE];
+  root["ssid"] = wifi::global_wifi_component->wifi_ssid_to(ssid_buf);
   root["signal"] = wifi::global_wifi_component->wifi_rssi();
   root["channel"] = wifi::global_wifi_component->get_wifi_channel();
 
@@ -235,13 +237,9 @@ void add_region_runtime(JsonObject root) {
 }
 
 void add_lamps_status(JsonObject root) {
-  root["lampState"] = false;
-  root["lampStateA"] = false;
-  root["lampStateB"] = false;
-
-  JsonArray lamps = root["lamps"].to<JsonArray>();
-
+  (void) root;
 #if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  JsonArray lamps = root["lamps"].to<JsonArray>();
   int lamp_count = storage::store->usage->beam.pref.lampCount;
   if (lamp_count < 0 || lamp_count > DEVICE_MAX_LAMP)
     lamp_count = DEVICE_MAX_LAMP;
@@ -270,8 +268,7 @@ void add_lamps_status(JsonObject root) {
 }
 
 void add_motion_status(JsonObject root) {
-  root["motion"] = false;
-
+  (void) root;
 #if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   const bool motion = storage::store->usage->motion.lastStart > storage::store->usage->motion.lastStop;
   root["motion"] = motion;
@@ -284,33 +281,6 @@ void add_motion_status(JsonObject root) {
   motion_obj["stopCount"] = storage::store->usage->motion.stopCount;
   motion_obj["lastStartSec"] = storage::store->usage->motion.lastStart;
   motion_obj["lastStopSec"] = storage::store->usage->motion.lastStop;
-#endif
-}
-
-void add_fans_status(JsonObject root) {
-  root["fanSpeedA"] = 0;
-  root["fanSpeedB"] = 0;
-
-  JsonArray fans = root["fans"].to<JsonArray>();
-
-#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
-  int fan_count = storage::store->usage->beam.pref.fanCount;
-  if (fan_count < 0 || fan_count > DEVICE_MAX_FAN)
-    fan_count = DEVICE_MAX_FAN;
-
-  for (int i = 0; i < fan_count; i++) {
-    const bool running = storage::store->usage->fan[i].lastStart > storage::store->usage->fan[i].lastStop;
-    JsonObject fan = fans.add<JsonObject>();
-    fan["channel"] = i + 1;
-    fan["running"] = running;
-    fan["speed"] = 0;
-    fan["rotationCount"] = storage::store->usage->fan[i].rotationCount;
-    fan["onSec"] = storage::store->usage->fan[i].onSec;
-    fan["startCount"] = storage::store->usage->fan[i].startCount;
-    fan["stopCount"] = storage::store->usage->fan[i].stopCount;
-    fan["lastStartSec"] = storage::store->usage->fan[i].lastStart;
-    fan["lastStopSec"] = storage::store->usage->fan[i].lastStop;
-  }
 #endif
 }
 
@@ -340,6 +310,32 @@ void add_error_status(JsonObject root) {
     warning["code"] = "device_error";
     warning["message"] = storage::store->usage->error.lastDesc;
   }
+#endif
+}
+
+void add_diagnostics_telemetry(JsonObject root) {
+  JsonObject telemetry = root["telemetry"].to<JsonObject>();
+  telemetry["wifi"] = wifi::global_wifi_component != nullptr ? "live" : "disabled";
+  telemetry["memory"] = "live";
+#ifdef GSMART_FEATURE_FILESYSTEM
+  telemetry["filesystem"] = "live";
+#else
+  telemetry["filesystem"] = "disabled";
+#endif
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  telemetry["lamps"] = "logical";
+  telemetry["motion"] = "live";
+#else
+  telemetry["lamps"] = "unsupported";
+  telemetry["motion"] = "unsupported";
+#endif
+  telemetry["fans"] = "not_instrumented";
+  telemetry["relays"] = "not_instrumented";
+  telemetry["triacs"] = "not_instrumented";
+#ifdef GSMART_FEATURE_USAGE
+  telemetry["errors"] = "stored";
+#else
+  telemetry["errors"] = "disabled";
 #endif
 }
 
@@ -407,6 +403,9 @@ void ApiCoreV1::build_info(JsonObject root) {
   JsonObject capabilities = root["capabilities"].to<JsonObject>();
   capabilities["control"] = true;
   capabilities["diagnostics"] = true;
+  const uint8_t model_num = storage::store->get_model_num();
+  capabilities["emitter"] = storage::isEmitterModel(model_num);
+  capabilities["actuator"] = model_num == 51 || model_num == 52;
 #ifdef GSMART_FEATURE_SCHEDULE
   capabilities["scheduler"] = true;
 #else
@@ -444,7 +443,6 @@ void ApiCoreV1::build_status(JsonObject root) {
   add_wifi_runtime(root);
   add_lamps_status(root);
   add_motion_status(root);
-  add_fans_status(root);
   add_error_status(root);
 
   JsonObject situation = root["situation"].to<JsonObject>();
@@ -469,6 +467,7 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
   root["model"] = storage::store->get_model();
   root["serial"] = storage::store->get_serial();
   root["uptimeSec"] = millis() / 1000;
+  add_diagnostics_telemetry(root);
 
   JsonObject memory = root["memory"].to<JsonObject>();
   memory["freeHeap"] = ESP.getFreeHeap();
@@ -514,25 +513,7 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
 
   add_lamps_status(root);
   add_motion_status(root);
-  add_fans_status(root);
   add_error_status(root);
-
-  JsonArray relays = root["relays"].to<JsonArray>();
-  JsonArray triacs = root["triacs"].to<JsonArray>();
-#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
-  int lamp_count = storage::store->usage->beam.pref.lampCount;
-  if (lamp_count < 0 || lamp_count > DEVICE_MAX_LAMP)
-    lamp_count = DEVICE_MAX_LAMP;
-  for (int i = 0; i < lamp_count; i++) {
-    JsonObject relay = relays.add<JsonObject>();
-    relay["channel"] = i + 1;
-    relay["diagnosticAvailable"] = false;
-
-    JsonObject triac = triacs.add<JsonObject>();
-    triac["channel"] = i + 1;
-    triac["diagnosticAvailable"] = false;
-  }
-#endif
 }
 
 void ApiCoreV1::build_consumption(JsonObject root) {
