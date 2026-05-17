@@ -14,6 +14,7 @@
 #include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -175,6 +176,21 @@ void add_wifi_runtime(JsonObject root) {
       break;
     }
   }
+}
+
+void add_device_time(JsonObject root) {
+  const time_t now = time(nullptr);
+  JsonObject time_obj = root["time"].to<JsonObject>();
+
+  char local_buf[24] = "";
+  tm *local = localtime(&now);
+  if (local != nullptr)
+    std::strftime(local_buf, sizeof(local_buf), "%Y-%m-%d %H:%M:%S", local);
+
+  time_obj["epoch"] = static_cast<uint32_t>(now);
+  time_obj["local"] = local_buf;
+  time_obj["valid"] = now >= 1704067200;  // 2024-01-01; guards unsynced 1970 clocks.
+  time_obj["uptimeSec"] = millis() / 1000;
 }
 
 void add_situation(JsonObject root) {
@@ -380,17 +396,13 @@ void ApiCoreV1::build_info(JsonObject root) {
   root["serial"] = storage::store->get_serial();
   root["mac"] = storage::convertMacToStr(mac);
   root["name"] = this->get_device_name_();
-  root["fwr"] = firmware_version;
-  root["fw"] = firmware_version;
-  root["fwver"] = firmware_version;
-  root["build"] = build;
 
   JsonObject firmware = root["firmware"].to<JsonObject>();
-  firmware["fwr"] = firmware_version;
   firmware["build"] = build;
   firmware["version"] = firmware_version;
 
   add_wifi_runtime(root);
+  add_device_time(root);
 
   JsonObject capabilities = root["capabilities"].to<JsonObject>();
   capabilities["control"] = true;
@@ -470,7 +482,6 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
 #endif
 
   JsonObject diagnostics_firmware = root["firmware"].to<JsonObject>();
-  diagnostics_firmware["fwr"] = firmware_version;
   diagnostics_firmware["build"] = build;
   diagnostics_firmware["version"] = firmware_version;
 #ifdef ESP32
