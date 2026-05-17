@@ -77,6 +77,7 @@ class ApiCoreV1 : public Component {
  protected:
   std::string get_build_string_() const;
   std::string get_firmware_version_() const;
+  void sync_preferences_now_() const;
 
   CallbackManager<void(IdentifyRequest)> identify_callback_{};
   std::string firmware_version_{};

@@ -344,6 +344,11 @@ std::string ApiCoreV1::get_firmware_version_() const {
   return this->get_build_string_();
 }
 
+void ApiCoreV1::sync_preferences_now_() const {
+  if (global_preferences != nullptr)
+    global_preferences->sync();
+}
+
 void ApiCoreV1::build_info(JsonObject root) {
   uint8_t mac[6];
   get_mac_address_raw(mac);
@@ -715,6 +720,9 @@ bool ApiCoreV1::apply_network(JsonObject root) {
       changed = true;
     }
   }
+
+  if (changed)
+    this->sync_preferences_now_();
 
   return changed;
 }
@@ -1214,6 +1222,8 @@ bool ApiCoreV1::handle_api_config(JsonObject root, JsonObject response) {
 
   response["ok"] = true;
   response["applied"] = changed;
+  if (changed)
+    this->sync_preferences_now_();
   return changed;
 }
 
@@ -1269,6 +1279,7 @@ bool ApiCoreV1::apply_settings_consumables(JsonObject root) {
   }
   if (changed) {
     storage::store->usage->save();
+    this->sync_preferences_now_();
   }
   return changed;
 #else
