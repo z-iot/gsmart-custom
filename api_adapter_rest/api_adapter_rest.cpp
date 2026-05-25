@@ -59,7 +59,11 @@ void ApiAdapterRest::setup() {
     });
     web_server_base::on_post_json(server, (base_path + "/network").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
       bool applied = this->core_->apply_network(root);
-      send_ok(request, [applied](JsonObject res) { res["applied"] = applied; });
+      send_json(request, [this, applied](JsonObject res) {
+        this->core_->build_network(res);
+        res["ok"] = true;
+        res["applied"] = applied;
+      });
     });
     web_server_base::on(server, (base_path + "/network/scan").c_str(), HTTP_POST, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject res) { this->core_->build_network_scan(res); });

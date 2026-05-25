@@ -607,6 +607,13 @@ void ApiCoreV1::build_network(JsonObject root) {
 
   JsonObject cloud_obj = root["cloud"].to<JsonObject>();
   cloud_obj["mode"] = cloud.cloud_mode;
+
+  const auto &persistence = mgr->get_persistence_status();
+  JsonObject persistence_obj = root["persistence"].to<JsonObject>();
+  persistence_obj["client_loaded"] = persistence.client_loaded;
+  persistence_obj["client_save_ok"] = persistence.client_save_ok;
+  persistence_obj["client_sync_ok"] = persistence.client_sync_ok;
+  persistence_obj["client_verify_ok"] = persistence.client_verify_ok;
 }
 
 void ApiCoreV1::build_network_scan(JsonObject root) {
@@ -646,19 +653,33 @@ bool ApiCoreV1::apply_network(JsonObject root) {
       return std::string(fallback);
     return value.as<std::string>();
   };
+  auto json_password_or_current = [](JsonObject obj, const char *fallback) -> std::string {
+    if (!obj["password"].isNull())
+      return obj["password"].as<std::string>();
+    if (!obj["pswd"].isNull())
+      return obj["pswd"].as<std::string>();
+    if (!obj["pwd"].isNull())
+      return obj["pwd"].as<std::string>();
+    if (!obj["wifi_password"].isNull())
+      return obj["wifi_password"].as<std::string>();
+    if (!obj["wifi_pass"].isNull())
+      return obj["wifi_pass"].as<std::string>();
+    return std::string(fallback);
+  };
 
   bool changed = false;
 
   // Legacy mapping
   if (!root["wifi_ssid"].isNull()) {
-    mgr->set_sta_customer_primary(root["wifi_ssid"].as<std::string>(), json_or_current(root["wifi_password"], client_settings.customer_primary_password));
+    mgr->set_sta_customer_primary(root["wifi_ssid"].as<std::string>(),
+                                  json_password_or_current(root, client_settings.customer_primary_password));
     changed = true;
   }
 
   if (root["client"].is<JsonObject>()) {
     JsonObject client_obj = root["client"].as<JsonObject>();
     std::string ssid = json_string(client_obj["ssid"]);
-    std::string password = json_or_current(client_obj["password"], client_settings.customer_primary_password);
+    std::string password = json_password_or_current(client_obj, client_settings.customer_primary_password);
     if (!ssid.empty()) {
       mgr->set_sta_customer_primary(ssid, password);
       changed = true;
@@ -675,17 +696,20 @@ bool ApiCoreV1::apply_network(JsonObject root) {
     if (sta["service"].is<JsonObject>()) {
       JsonObject s = sta["service"].as<JsonObject>();
       uint8_t mode = s["mode"].isNull() ? client_settings.service_mode : s["mode"].as<uint8_t>();
-      mgr->set_sta_service(json_or_current(s["ssid"], client_settings.service_ssid), json_or_current(s["password"], client_settings.service_password), mode);
+      mgr->set_sta_service(json_or_current(s["ssid"], client_settings.service_ssid),
+                           json_password_or_current(s, client_settings.service_password), mode);
       changed = true;
     }
     if (sta["customer_primary"].is<JsonObject>()) {
       JsonObject s = sta["customer_primary"].as<JsonObject>();
-      mgr->set_sta_customer_primary(json_or_current(s["ssid"], client_settings.customer_primary_ssid), json_or_current(s["password"], client_settings.customer_primary_password));
+      mgr->set_sta_customer_primary(json_or_current(s["ssid"], client_settings.customer_primary_ssid),
+                                    json_password_or_current(s, client_settings.customer_primary_password));
       changed = true;
     }
     if (sta["customer_secondary"].is<JsonObject>()) {
       JsonObject s = sta["customer_secondary"].as<JsonObject>();
-      mgr->set_sta_customer_secondary(json_or_current(s["ssid"], client_settings.customer_secondary_ssid), json_or_current(s["password"], client_settings.customer_secondary_password));
+      mgr->set_sta_customer_secondary(json_or_current(s["ssid"], client_settings.customer_secondary_ssid),
+                                      json_password_or_current(s, client_settings.customer_secondary_password));
       changed = true;
     }
   }
@@ -707,7 +731,7 @@ bool ApiCoreV1::apply_network(JsonObject root) {
           s["manual_timeout_min"].isNull() ? mgr->get_service_ap_settings().manual_timeout_min
                                            : s["manual_timeout_min"].as<int32_t>();
       mgr->set_service_ap_timeouts(startup_timeout, manual_timeout);
-      mgr->set_service_ap(json_or_current(s["password"], ap_settings.service_ap_password), mode);
+      mgr->set_service_ap(json_password_or_current(s, ap_settings.service_ap_password), mode);
       changed = true;
     }
     if (soft_ap["region_ap"].is<JsonObject>()) {
@@ -720,7 +744,7 @@ bool ApiCoreV1::apply_network(JsonObject root) {
         mode = json_bool(s["enabled"], false) ? 1 : 0;
       }
       mgr->set_region_ap(json_or_current(s["ssid"], ap_settings.region_ap_ssid),
-                         json_or_current(s["password"], ap_settings.region_ap_password), mode, channel);
+                         json_password_or_current(s, ap_settings.region_ap_password), mode, channel);
       changed = true;
     }
   }

@@ -100,6 +100,19 @@ void GsmartWifiManager::copy_string_(char *dest, size_t size, const std::string 
   dest[size - 1] = '\0';
 }
 
+void GsmartWifiManager::log_client_settings_(const char *prefix) const {
+  ESP_LOGI(TAG,
+           "%s client_loaded=%s primary_ssid='%s' primary_password_set=%s secondary_ssid='%s' "
+           "secondary_password_set=%s sta_mode=%u service_ssid='%s' service_mode=%u",
+           prefix, this->persistence_status_.client_loaded ? "true" : "false",
+           this->client_settings_.customer_primary_ssid,
+           this->client_settings_.customer_primary_password[0] != '\0' ? "true" : "false",
+           this->client_settings_.customer_secondary_ssid,
+           this->client_settings_.customer_secondary_password[0] != '\0' ? "true" : "false",
+           this->client_settings_.sta_mode, this->client_settings_.service_ssid,
+           this->client_settings_.service_mode);
+}
+
 void GsmartWifiManager::set_sta_service(const std::string &ssid, const std::string &password, uint8_t mode) {
   this->client_settings_.service_mode = mode;
   this->copy_string_(this->client_settings_.service_ssid, sizeof(this->client_settings_.service_ssid), ssid,
@@ -323,8 +336,18 @@ void GsmartWifiManager::start_scan(bool manual) {
 
 void GsmartWifiManager::load_settings() {
   this->client_pref_ = global_preferences->make_preference<WifiSettingsClient>(WIFI_SETTINGS_CLIENT_PREF_ID);
-  if (!this->client_pref_.load(&this->client_settings_) || this->client_settings_.magic != WIFI_SETTINGS_MAGIC ||
-      this->client_settings_.version != WIFI_SETTINGS_CLIENT_VERSION) {
+  WifiSettingsClient loaded_client{};
+  const bool client_loaded = this->client_pref_.load(&loaded_client);
+  const bool client_valid = client_loaded && loaded_client.magic == WIFI_SETTINGS_MAGIC &&
+                            loaded_client.version == WIFI_SETTINGS_CLIENT_VERSION;
+  this->persistence_status_.client_loaded = client_valid;
+  this->persistence_status_.client_save_ok = true;
+  this->persistence_status_.client_sync_ok = true;
+  this->persistence_status_.client_verify_ok = true;
+  if (client_valid) {
+    this->client_settings_ = loaded_client;
+    this->log_client_settings_("Loaded Client Wi-Fi settings");
+  } else {
     ESP_LOGI(TAG, "Initializing default Client Wi-Fi settings (v%u)", WIFI_SETTINGS_CLIENT_VERSION);
     std::memset(&this->client_settings_, 0, sizeof(WifiSettingsClient));
     this->client_settings_.magic = WIFI_SETTINGS_MAGIC;
@@ -336,6 +359,7 @@ void GsmartWifiManager::load_settings() {
                        SERVICE_DEFAULT_PWD);
     this->client_settings_.service_mode = 1;
     this->save_client_settings();
+    this->log_client_settings_("Default Client Wi-Fi settings stored");
   }
 
   this->ap_pref_ = global_preferences->make_preference<WifiSettingsAp>(WIFI_SETTINGS_AP_PREF_ID);
@@ -408,9 +432,30 @@ void GsmartWifiManager::load_settings() {
   }
 }
 
-void GsmartWifiManager::save_client_settings() {
-  this->client_pref_.save(&this->client_settings_);
-  global_preferences->sync();
+bool GsmartWifiManager::save_client_settings() {
+  const bool save_ok = this->client_pref_.save(&this->client_settings_);
+  const bool sync_ok = global_preferences != nullptr && global_preferences->sync();
+
+  WifiSettingsClient verify{};
+  const bool verify_load_ok = this->client_pref_.load(&verify);
+  const bool verify_ok = verify_load_ok &&
+                         std::memcmp(&verify, &this->client_settings_, sizeof(WifiSettingsClient)) == 0;
+
+  this->persistence_status_.client_save_ok = save_ok;
+  this->persistence_status_.client_sync_ok = sync_ok;
+  this->persistence_status_.client_verify_ok = verify_ok;
+
+  if (!save_ok || !sync_ok || !verify_ok) {
+    ESP_LOGW(TAG, "Client Wi-Fi settings persistence failed: save=%s sync=%s verify=%s",
+             save_ok ? "true" : "false", sync_ok ? "true" : "false", verify_ok ? "true" : "false");
+  } else {
+    ESP_LOGI(TAG, "Client Wi-Fi settings persisted and verified: primary_ssid='%s' password_set=%s sta_mode=%u",
+             this->client_settings_.customer_primary_ssid,
+             this->client_settings_.customer_primary_password[0] != '\0' ? "true" : "false",
+             this->client_settings_.sta_mode);
+  }
+
+  return save_ok && sync_ok && verify_ok;
 }
 
 void GsmartWifiManager::save_ap_settings() {
@@ -484,12 +529,10 @@ void GsmartWifiManager::update_sta_priority() {
 
 void GsmartWifiManager::apply_service_ap_startup_policy_() {
   this->cancel_service_ap_auto_off_();
-  const bool has_customer_wifi = this->client_settings_.customer_primary_ssid[0] != '\0' ||
-                                 this->client_settings_.customer_secondary_ssid[0] != '\0';
   const bool region_ap_enabled = this->ap_settings_.region_ap_mode != 0;
   this->service_ap_runtime_active_ = this->ap_settings_.service_ap_mode != 0 &&
                                      this->service_ap_settings_.startup_timeout_min >= 0 &&
-                                     !has_customer_wifi && !region_ap_enabled;
+                                     !region_ap_enabled;
 }
 
 void GsmartWifiManager::apply_wifi_state() {

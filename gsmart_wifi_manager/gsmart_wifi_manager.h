@@ -64,6 +64,13 @@ struct WifiScanCacheItem {
   bool known{false};
 };
 
+struct WifiPersistenceStatus {
+  bool client_loaded{false};
+  bool client_save_ok{true};
+  bool client_sync_ok{true};
+  bool client_verify_ok{true};
+};
+
 class GsmartWifiManager : public Component,
                           public wifi::WiFiScanResultsListener {
 public:
@@ -124,16 +131,18 @@ public:
   const std::vector<WifiScanCacheItem> &get_scan_results() const {
     return this->scan_cache_;
   }
-  void save_client_settings();
+  bool save_client_settings();
   void save_ap_settings();
   const WifiSettingsClient &get_client_settings() const {
     return client_settings_;
   }
   const WifiSettingsAp &get_ap_settings() const { return ap_settings_; }
   const WifiSettingsServiceAp &get_service_ap_settings() const { return service_ap_settings_; }
+  const WifiPersistenceStatus &get_persistence_status() const { return persistence_status_; }
 
 protected:
   void load_settings();
+  void log_client_settings_(const char *prefix) const;
   void apply_service_ap_startup_policy_();
   void apply_wifi_state();
   void update_sta_priority();
@@ -166,6 +175,7 @@ protected:
   WifiSettingsAp ap_settings_;
   WifiSettingsServiceAp service_ap_settings_;
   CloudSettings cloud_settings_;
+  WifiPersistenceStatus persistence_status_;
   ESPPreferenceObject client_pref_;
   ESPPreferenceObject ap_pref_;
   ESPPreferenceObject service_ap_pref_;
