@@ -10,6 +10,7 @@
 #include "esphome/core/log.h"
 
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,18 +71,48 @@ void ApiAdapterGLink::setup() {
     return;
   }
 
+  if (!this->parse_url_(&this->parsed_)) {
+    ESP_LOGE(TAG, "Invalid G-Link url: %s", this->url_.c_str());
+    this->mark_failed();
+    return;
+  }
+  this->parsed_url_ = true;
+  this->next_connect_ms_ = millis() + 15000;
+
   storage::store->add_on_radiation_applied(
       [this](storage::RadiationMode mode, storage::RadiationSource source) { this->send_radiation_event_(mode, source); });
-  this->connect_();
+  ESP_LOGI(TAG, "G-Link adapter enabled; first connect is delayed until WiFi is stable");
 }
 
 void ApiAdapterGLink::loop() {
-  if (!this->started_)
+  if (!this->parsed_url_)
     return;
+
+  const uint32_t now = millis();
+  if (!network::is_connected()) {
+    if (this->started_)
+      this->stop_("network disconnected");
+    return;
+  }
+
+  if (!this->started_) {
+    if (static_cast<int32_t>(now - this->next_connect_ms_) < 0)
+      return;
+    if (!this->probe_gateway_()) {
+      this->next_connect_ms_ = now + this->reconnect_interval_ms_;
+      return;
+    }
+    this->connect_();
+    return;
+  }
 
   this->websocket_.loop();
 
-  const uint32_t now = millis();
+  if (!this->connected_ && this->connect_started_ms_ != 0 && now - this->connect_started_ms_ > 8000) {
+    this->stop_("connect timeout");
+    return;
+  }
+
   if (this->authenticated_ && this->heartbeat_interval_ms_ > 0 &&
       now - this->last_heartbeat_ms_ >= this->heartbeat_interval_ms_) {
     this->send_heartbeat_();
@@ -97,26 +128,40 @@ void ApiAdapterGLink::dump_config() {
 }
 
 void ApiAdapterGLink::connect_() {
-  ParsedUrl parsed;
-  if (!this->parse_url_(&parsed)) {
-    ESP_LOGE(TAG, "Invalid G-Link url: %s", this->url_.c_str());
-    this->mark_failed();
-    return;
-  }
-
   this->websocket_.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
     this->on_websocket_event_(type, payload, length);
   });
-  this->websocket_.setReconnectInterval(5000);
+  this->websocket_.setReconnectInterval(this->reconnect_interval_ms_);
 
-  ESP_LOGI(TAG, "Connecting to G-Link %s%s:%u%s", parsed.secure ? "wss://" : "ws://", parsed.host.c_str(),
-           parsed.port, parsed.path.c_str());
-  if (parsed.secure) {
-    this->websocket_.beginSSL(parsed.host.c_str(), parsed.port, parsed.path.c_str());
+  ESP_LOGI(TAG, "Connecting to G-Link %s%s:%u%s", this->parsed_.secure ? "wss://" : "ws://", this->parsed_.host.c_str(),
+           this->parsed_.port, this->parsed_.path.c_str());
+  if (this->parsed_.secure) {
+    this->websocket_.beginSSL(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
   } else {
-    this->websocket_.begin(parsed.host.c_str(), parsed.port, parsed.path.c_str());
+    this->websocket_.begin(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
   }
   this->started_ = true;
+  this->connect_started_ms_ = millis();
+}
+
+void ApiAdapterGLink::stop_(const char *reason) {
+  ESP_LOGW(TAG, "G-Link stopped: %s", reason);
+  this->websocket_.disconnect();
+  this->started_ = false;
+  this->connected_ = false;
+  this->authenticated_ = false;
+  this->connect_started_ms_ = 0;
+  this->next_connect_ms_ = millis() + this->reconnect_interval_ms_;
+}
+
+bool ApiAdapterGLink::probe_gateway_() {
+  WiFiClient probe;
+  probe.setConnectionTimeout(750);
+  const bool ok = probe.connect(this->parsed_.host.c_str(), this->parsed_.port, 750);
+  probe.stop();
+  if (!ok)
+    ESP_LOGW(TAG, "G-Link gateway unavailable, retrying later");
+  return ok;
 }
 
 bool ApiAdapterGLink::parse_url_(ParsedUrl *parsed) const {
@@ -152,6 +197,7 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
     case WStype_CONNECTED:
       this->connected_ = true;
       this->authenticated_ = false;
+      this->connect_started_ms_ = 0;
       this->client_nonce_ = this->random_hex_(16);
       this->session_id_.clear();
       this->server_nonce_.clear();
@@ -163,6 +209,9 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->connected_ = false;
       this->authenticated_ = false;
       ESP_LOGW(TAG, "G-Link websocket disconnected");
+      this->started_ = false;
+      this->connect_started_ms_ = 0;
+      this->next_connect_ms_ = millis() + this->reconnect_interval_ms_;
       break;
     case WStype_TEXT:
       this->handle_text_(std::string(reinterpret_cast<const char *>(payload), length));

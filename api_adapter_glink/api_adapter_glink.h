@@ -36,6 +36,8 @@ class ApiAdapterGLink : public Component {
   };
 
   void connect_();
+  void stop_(const char *reason);
+  bool probe_gateway_();
   bool parse_url_(ParsedUrl *parsed) const;
   void on_websocket_event_(WStype_t type, uint8_t *payload, size_t length);
   void handle_text_(const std::string &text);
@@ -61,6 +63,7 @@ class ApiAdapterGLink : public Component {
 
   api_core_v1::ApiCoreV1 *core_{nullptr};
   WebSocketsClient websocket_{};
+  ParsedUrl parsed_{};
   std::string url_{};
   std::string key_id_{};
   std::string secret_{};
@@ -69,7 +72,11 @@ class ApiAdapterGLink : public Component {
   std::string server_nonce_{};
   uint32_t heartbeat_interval_ms_{20000};
   uint32_t last_heartbeat_ms_{0};
+  uint32_t next_connect_ms_{0};
+  uint32_t connect_started_ms_{0};
   uint32_t frame_seq_{0};
+  uint32_t reconnect_interval_ms_{60000};
+  bool parsed_url_{false};
   bool started_{false};
   bool connected_{false};
   bool authenticated_{false};
