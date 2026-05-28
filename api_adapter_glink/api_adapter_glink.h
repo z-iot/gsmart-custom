@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ESP32
+#if defined(ESP32) || defined(ESP8266)
 
 #include "esphome/core/component.h"
 #include "esphome/components/api_core_v1/api_core_v1.h"
@@ -23,8 +23,8 @@ class ApiAdapterGLink : public Component {
   void dump_config() override;
 
   void set_url(const std::string &url) { this->url_ = url; }
-  void set_key_id(const std::string &key_id) { this->key_id_ = key_id; }
-  void set_secret(const std::string &secret) { this->secret_ = secret; }
+  void set_promoss_secret(const std::string &promoss_secret) { this->promoss_secret_ = promoss_secret; }
+  void set_tls_ca_cert(const std::string &tls_ca_cert) { this->tls_ca_cert_ = tls_ca_cert; }
   void set_heartbeat_interval(uint32_t heartbeat_interval_ms) { this->heartbeat_interval_ms_ = heartbeat_interval_ms; }
 
  protected:
@@ -48,9 +48,7 @@ class ApiAdapterGLink : public Component {
   void send_hello_();
   void send_auth_();
   void send_heartbeat_();
-  void send_ack_(const std::string &ref_id, const std::string &command_id, const char *status, const std::string &error = "");
-  void send_response_(const std::string &ref_id, const std::string &command_id, const char *status, JsonObject body,
-                      const std::string &error = "");
+  void send_response_(const std::string &command_id, const char *status, JsonObject body, const std::string &error = "");
   void send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source);
   bool send_frame_(const char *type, const char *peer, const std::string &id, std::function<void(JsonObject)> builder);
   void build_diagnostics_(JsonObject root) const;
@@ -59,22 +57,26 @@ class ApiAdapterGLink : public Component {
 
   std::string device_serial_() const;
   std::string device_mac_() const;
+  std::string derived_device_secret_() const;
   std::string device_model_() const;
+  std::string device_display_name_() const;
   std::string next_frame_id_(const char *prefix);
   std::string random_hex_(size_t bytes) const;
-  std::string hmac_sha256_hex_(const std::string &input) const;
+  std::string hmac_sha256_hex_(const std::string &key, const std::string &input) const;
 
   api_core_v1::ApiCoreV1 *core_{nullptr};
   WebSocketsClient websocket_{};
   ParsedUrl parsed_{};
   std::string url_{};
-  std::string key_id_{};
-  std::string secret_{};
+  std::string promoss_secret_{};
+  std::string tls_ca_cert_{};
   std::string client_nonce_{};
   std::string session_id_{};
   std::string server_nonce_{};
+  std::string event_level_{"basic"};
   uint32_t heartbeat_interval_ms_{20000};
   uint32_t last_heartbeat_ms_{0};
+  uint32_t event_level_expires_ms_{0};
   uint32_t next_connect_ms_{0};
   uint32_t connect_started_ms_{0};
   uint32_t frame_seq_{0};
@@ -101,4 +103,4 @@ class ApiAdapterGLink : public Component {
 }  // namespace api_adapter_glink
 }  // namespace esphome
 
-#endif  // ESP32
+#endif  // defined(ESP32) || defined(ESP8266)

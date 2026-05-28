@@ -1,6 +1,6 @@
 #include "api_adapter_glink.h"
 
-#ifdef ESP32
+#if defined(ESP32) || defined(ESP8266)
 
 #include "esphome/components/network/util.h"
 #include "esphome/components/storage/store.h"
@@ -10,13 +10,22 @@
 #include "esphome/core/log.h"
 
 #include <ArduinoJson.h>
-#include <WiFi.h>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+
+#ifdef ESP32
+#include <WiFi.h>
 #include <esp_system.h>
 #include <mbedtls/md.h>
+#endif
+
+#ifdef ESP8266
+#include <Crypto.h>
+#include <ESP8266WiFi.h>
+#endif
 
 namespace esphome {
 namespace api_adapter_glink {
@@ -57,6 +66,37 @@ std::string json_error(JsonObject response, const char *fallback) {
   return fallback;
 }
 
+std::string canonical_mac(const std::string &value) {
+  std::string clean;
+  clean.reserve(12);
+  for (char ch : value) {
+    if (std::isxdigit(static_cast<unsigned char>(ch)))
+      clean.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  if (clean.size() != 12)
+    return value;
+  std::string out;
+  out.reserve(17);
+  for (size_t i = 0; i < clean.size(); i += 2) {
+    if (!out.empty())
+      out.push_back(':');
+    out.append(clean.substr(i, 2));
+  }
+  return out;
+}
+
+const char *normalize_event_level(const char *level) {
+  if (level == nullptr)
+    return "basic";
+  if (strcmp(level, "verbose") == 0)
+    return "verbose";
+  if (strcmp(level, "diagnostic") == 0)
+    return "diagnostic";
+  if (strcmp(level, "info") == 0)
+    return "info";
+  return "basic";
+}
+
 }  // namespace
 
 void ApiAdapterGLink::setup() {
@@ -68,8 +108,8 @@ void ApiAdapterGLink::setup() {
   }
   this->core_->set_glink_diagnostics_provider([this](JsonObject root) { this->build_diagnostics_(root); });
 
-  if (this->url_.empty() || this->key_id_.empty() || this->secret_.empty()) {
-    ESP_LOGE(TAG, "G-Link url, key_id and secret are required");
+  if (this->url_.empty() || this->promoss_secret_.empty()) {
+    ESP_LOGE(TAG, "G-Link url and promoss_secret are required");
     this->set_error_("missing_config");
     this->mark_failed();
     return;
@@ -118,6 +158,12 @@ void ApiAdapterGLink::loop() {
 
   this->websocket_.loop();
 
+  if (this->event_level_expires_ms_ != 0 && static_cast<int32_t>(now - this->event_level_expires_ms_) >= 0) {
+    this->event_level_ = "basic";
+    this->event_level_expires_ms_ = 0;
+    ESP_LOGI(TAG, "G-Link event level expired; reverted to basic");
+  }
+
   if (!this->connected_ && this->connect_started_ms_ != 0 && now - this->connect_started_ms_ > 8000) {
     this->stop_("connect timeout");
     return;
@@ -133,7 +179,8 @@ void ApiAdapterGLink::loop() {
 void ApiAdapterGLink::dump_config() {
   ESP_LOGCONFIG(TAG, "G-Link API adapter:");
   ESP_LOGCONFIG(TAG, "  URL: %s", this->url_.c_str());
-  ESP_LOGCONFIG(TAG, "  Key ID: %s", this->key_id_.c_str());
+  ESP_LOGCONFIG(TAG, "  TLS CA verification: %s", this->tls_ca_cert_.empty() ? "disabled" : "enabled");
+  ESP_LOGCONFIG(TAG, "  Key ID/MAC: %s", this->device_mac_().c_str());
   ESP_LOGCONFIG(TAG, "  Heartbeat: %ums", this->heartbeat_interval_ms_);
 }
 
@@ -150,7 +197,13 @@ void ApiAdapterGLink::connect_() {
   ESP_LOGI(TAG, "Connecting to G-Link %s%s:%u%s", this->parsed_.secure ? "wss://" : "ws://", this->parsed_.host.c_str(),
            this->parsed_.port, this->parsed_.path.c_str());
   if (this->parsed_.secure) {
-    this->websocket_.beginSSL(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
+    if (!this->tls_ca_cert_.empty()) {
+      this->websocket_.beginSslWithCA(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str(),
+                                      this->tls_ca_cert_.c_str());
+    } else {
+      ESP_LOGW(TAG, "WSS is enabled without a CA certificate; traffic is encrypted but server identity is not verified");
+      this->websocket_.beginSSL(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
+    }
   } else {
     this->websocket_.begin(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
   }
@@ -174,8 +227,13 @@ bool ApiAdapterGLink::probe_gateway_() {
   this->probe_attempts_++;
   this->last_probe_ms_ = millis();
   WiFiClient probe;
+#ifdef ESP32
   probe.setConnectionTimeout(750);
   const bool ok = probe.connect(this->parsed_.host.c_str(), this->parsed_.port, 750);
+#else
+  probe.setTimeout(750);
+  const bool ok = probe.connect(this->parsed_.host.c_str(), this->parsed_.port);
+#endif
   probe.stop();
   this->last_probe_ok_ = ok;
   if (!ok) {
@@ -276,11 +334,8 @@ void ApiAdapterGLink::handle_text_(const std::string &text) {
     this->handle_challenge_(payload);
   } else if (strcmp(type, "command") == 0) {
     this->handle_command_(ref_id, payload);
-  } else if (strcmp(type, "error") == 0) {
-    const char *code = payload["code"] | "glink_error";
-    this->set_state_("server_error");
-    this->set_error_(code);
-    ESP_LOGW(TAG, "G-Link error frame: %s", code);
+  } else {
+    ESP_LOGW(TAG, "Unsupported G-Link frame type: %s", type);
   }
 }
 
@@ -303,13 +358,12 @@ void ApiAdapterGLink::handle_challenge_(JsonObject payload) {
 void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payload) {
   const std::string command_id = payload["commandId"].as<std::string>();
   const std::string name = payload["name"].as<std::string>();
-  if (ref_id.empty() || command_id.empty() || name.empty()) {
+  if (command_id.empty() || name.empty()) {
     this->set_error_("invalid_command_frame");
     ESP_LOGW(TAG, "Invalid G-Link command frame");
     return;
   }
-
-  this->send_ack_(ref_id, command_id, "accepted");
+  (void) ref_id;
 
   JsonDocument empty_body_doc;
   JsonObject body;
@@ -318,7 +372,7 @@ void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payl
   JsonDocument response_doc;
   JsonObject response = response_doc.to<JsonObject>();
   std::string error = this->handle_gnode_command_(name, body, response);
-  this->send_response_(ref_id, command_id, error.empty() ? "ok" : "error", response, error);
+  this->send_response_(command_id, error.empty() ? "ok" : "error", response, error);
 }
 
 std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, JsonObject body, JsonObject response) {
@@ -374,6 +428,15 @@ std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, Json
     const bool saved = this->core_->apply_scheduler_state(body);
     response["ok"] = true;
     response["saved"] = saved;
+  } else if (name == "g-node.events.set") {
+    const char *level = normalize_event_level(body["level"] | "basic");
+    const uint32_t ttl_sec =
+        body["ttlSec"].is<uint32_t>() ? body["ttlSec"].as<uint32_t>() : (body["ttl"].is<uint32_t>() ? body["ttl"].as<uint32_t>() : 300);
+    this->event_level_ = level;
+    this->event_level_expires_ms_ = ttl_sec > 0 ? millis() + (ttl_sec * 1000UL) : 0;
+    response["ok"] = true;
+    response["level"] = this->event_level_;
+    response["ttlSec"] = ttl_sec;
   } else if (name == "g-node.region.set") {
     const bool saved = this->core_->apply_region(body);
     response["ok"] = true;
@@ -410,7 +473,9 @@ void ApiAdapterGLink::send_hello_() {
     payload["serial"] = this->device_serial_();
     payload["mac"] = this->device_mac_();
     payload["model"] = this->device_model_();
-    payload["keyId"] = this->key_id_;
+    payload["displayName"] = this->device_display_name_();
+    payload["keyId"] = this->device_mac_();
+    payload["authVersion"] = 1;
     payload["clientNonce"] = this->client_nonce_;
   });
 }
@@ -419,36 +484,27 @@ void ApiAdapterGLink::send_auth_() {
   const std::string input =
       this->device_serial_() + "|" + this->device_mac_() + "|" + this->client_nonce_ + "|" + this->server_nonce_ +
       "|" + this->session_id_;
-  const std::string signature = this->hmac_sha256_hex_(input);
+  const std::string signature = this->hmac_sha256_hex_(this->derived_device_secret_(), input);
   this->send_frame_("auth", "device", this->next_frame_id_("auth"), [this, signature](JsonObject payload) {
-    payload["keyId"] = this->key_id_;
+    payload["keyId"] = this->device_mac_();
     payload["signature"] = signature;
   });
 }
 
 void ApiAdapterGLink::send_heartbeat_() {
-  this->send_frame_("heartbeat", "device", this->next_frame_id_("hb"), [](JsonObject payload) {
-    payload["uptimeSec"] = millis() / 1000;
+  this->send_frame_("event", "device", this->next_frame_id_("hb"), [this](JsonObject payload) {
+    payload["kind"] = "device.heartbeat";
+    payload["level"] = "basic";
+    JsonObject body = payload["body"].to<JsonObject>();
+    body["uptimeSec"] = millis() / 1000;
+    body["eventLevel"] = this->event_level_;
   });
 }
 
-void ApiAdapterGLink::send_ack_(const std::string &ref_id, const std::string &command_id, const char *status,
-                                const std::string &error) {
-  this->send_frame_("ack", "device", this->next_frame_id_("ack"),
-                    [ref_id, command_id, status, error](JsonObject payload) {
-                      payload["refId"] = ref_id;
-                      payload["commandId"] = command_id;
-                      payload["status"] = status;
-                      if (!error.empty())
-                        payload["error"] = error;
-                    });
-}
-
-void ApiAdapterGLink::send_response_(const std::string &ref_id, const std::string &command_id, const char *status,
-                                     JsonObject body, const std::string &error) {
+void ApiAdapterGLink::send_response_(const std::string &command_id, const char *status, JsonObject body,
+                                     const std::string &error) {
   this->send_frame_("response", "device", this->next_frame_id_("response"),
-                    [ref_id, command_id, status, body, error](JsonObject payload) {
-                      payload["refId"] = ref_id;
+                    [command_id, status, body, error](JsonObject payload) {
                       payload["commandId"] = command_id;
                       payload["status"] = status;
                       payload["body"].set(body);
@@ -464,6 +520,7 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
   const bool active = mode != storage::RadiationMode::OFF;
   this->send_frame_("event", "device", this->next_frame_id_("event"), [this, active, mode, source](JsonObject payload) {
     payload["kind"] = active ? "radiation.started" : "radiation.stopped";
+    payload["level"] = this->event_level_;
     JsonObject body = payload["body"].to<JsonObject>();
     body["state"] = active ? "on" : "off";
     body["mode"] = radiation_mode_to_api(mode);
@@ -482,7 +539,7 @@ bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std:
 
   JsonDocument doc;
   JsonObject root = doc.to<JsonObject>();
-  root["v"] = 1;
+  root["v"] = 2;
   root["type"] = type;
   root["id"] = id;
   root["ts"] = static_cast<uint32_t>(time(nullptr));
@@ -510,6 +567,7 @@ void ApiAdapterGLink::build_diagnostics_(JsonObject root) const {
   root["port"] = this->parsed_.port;
   root["path"] = this->parsed_.path;
   root["secure"] = this->parsed_.secure;
+  root["tlsCaVerification"] = this->parsed_.secure && !this->tls_ca_cert_.empty();
   root["networkConnected"] = network::is_connected();
   root["started"] = this->started_;
   root["connected"] = this->connected_;
@@ -548,13 +606,29 @@ std::string ApiAdapterGLink::device_serial_() const {
 std::string ApiAdapterGLink::device_mac_() const {
   uint8_t mac[6];
   get_mac_address_raw(mac);
-  return storage::convertMacToStr(mac);
+  return canonical_mac(storage::convertMacToStr(mac));
+}
+
+std::string ApiAdapterGLink::derived_device_secret_() const {
+  return this->hmac_sha256_hex_(this->promoss_secret_, this->device_mac_());
 }
 
 std::string ApiAdapterGLink::device_model_() const {
   if (storage::store != nullptr)
     return storage::store->get_model();
   return App.get_name();
+}
+
+std::string ApiAdapterGLink::device_display_name_() const {
+  std::string model = this->device_model_();
+  if (!model.empty()) {
+    model[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(model[0])));
+    for (size_t i = 1; i < model.size(); i++)
+      model[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(model[i])));
+  } else {
+    model = "Device";
+  }
+  return model + "-" + this->device_serial_();
 }
 
 std::string ApiAdapterGLink::next_frame_id_(const char *prefix) {
@@ -567,22 +641,30 @@ std::string ApiAdapterGLink::random_hex_(size_t bytes) const {
   std::string out;
   out.reserve(bytes * 2);
   for (size_t i = 0; i < bytes; i++) {
+#ifdef ESP32
     const uint8_t value = static_cast<uint8_t>(esp_random() & 0xff);
+#else
+    const uint8_t value = static_cast<uint8_t>(ESP.random() & 0xff);
+#endif
     out.push_back(hex[value >> 4]);
     out.push_back(hex[value & 0x0f]);
   }
   return out;
 }
 
-std::string ApiAdapterGLink::hmac_sha256_hex_(const std::string &input) const {
+std::string ApiAdapterGLink::hmac_sha256_hex_(const std::string &key, const std::string &input) const {
   uint8_t digest[32];
+#ifdef ESP32
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
   mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
-  mbedtls_md_hmac_starts(&ctx, reinterpret_cast<const unsigned char *>(this->secret_.c_str()), this->secret_.size());
+  mbedtls_md_hmac_starts(&ctx, reinterpret_cast<const unsigned char *>(key.c_str()), key.size());
   mbedtls_md_hmac_update(&ctx, reinterpret_cast<const unsigned char *>(input.c_str()), input.size());
   mbedtls_md_hmac_finish(&ctx, digest);
   mbedtls_md_free(&ctx);
+#else
+  experimental::crypto::SHA256::hmac(input.c_str(), input.size(), key.c_str(), key.size(), digest, sizeof(digest));
+#endif
 
   char hex[65];
   for (size_t i = 0; i < sizeof(digest); i++)
@@ -594,4 +676,4 @@ std::string ApiAdapterGLink::hmac_sha256_hex_(const std::string &input) const {
 }  // namespace api_adapter_glink
 }  // namespace esphome
 
-#endif  // ESP32
+#endif  // defined(ESP32) || defined(ESP8266)

@@ -11,9 +11,9 @@ api_adapter_glink_ns = cg.esphome_ns.namespace("api_adapter_glink")
 ApiAdapterGLink = api_adapter_glink_ns.class_("ApiAdapterGLink", cg.Component)
 
 CONF_API_CORE_ID = "api_core_id"
-CONF_KEY_ID = "key_id"
-CONF_SECRET = "secret"
+CONF_PROMOSS_SECRET = "promoss_secret"
 CONF_HEARTBEAT_INTERVAL = "heartbeat_interval"
+CONF_TLS_CA_CERT = "tls_ca_cert"
 
 
 def validate_ws_url(value):
@@ -29,12 +29,11 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(ApiAdapterGLink),
             cv.Required(CONF_API_CORE_ID): cv.use_id(ApiCoreV1),
             cv.Required(CONF_URL): validate_ws_url,
-            cv.Required(CONF_KEY_ID): cv.string,
-            cv.Required(CONF_SECRET): cv.string,
+            cv.Required(CONF_PROMOSS_SECRET): cv.string,
+            cv.Optional(CONF_TLS_CA_CERT, default=""): cv.string,
             cv.Optional(CONF_HEARTBEAT_INTERVAL, default="20s"): cv.positive_time_period_milliseconds,
         }
     ).extend(cv.COMPONENT_SCHEMA),
-    cv.only_on_esp32,
     cv.only_with_arduino,
 )
 
@@ -45,7 +44,7 @@ async def to_code(config):
     await cg.register_component(var, config)
 
     cg.add(var.set_url(config[CONF_URL]))
-    cg.add(var.set_key_id(config[CONF_KEY_ID]))
-    cg.add(var.set_secret(config[CONF_SECRET]))
+    cg.add(var.set_promoss_secret(config[CONF_PROMOSS_SECRET]))
+    cg.add(var.set_tls_ca_cert(config[CONF_TLS_CA_CERT]))
     cg.add(var.set_heartbeat_interval(config[CONF_HEARTBEAT_INTERVAL].total_milliseconds))
     cg.add_library("links2004/WebSockets", "2.7.2")
