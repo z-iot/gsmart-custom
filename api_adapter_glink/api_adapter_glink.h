@@ -26,6 +26,7 @@ class ApiAdapterGLink : public Component {
   void set_promoss_secret(const std::string &promoss_secret) { this->promoss_secret_ = promoss_secret; }
   void set_tls_ca_cert(const std::string &tls_ca_cert) { this->tls_ca_cert_ = tls_ca_cert; }
   void set_heartbeat_interval(uint32_t heartbeat_interval_ms) { this->heartbeat_interval_ms_ = heartbeat_interval_ms; }
+  void set_full_heartbeat_interval(uint32_t full_heartbeat_interval_ms) { this->full_heartbeat_interval_ms_ = full_heartbeat_interval_ms; }
 
  protected:
   struct ParsedUrl {
@@ -47,10 +48,12 @@ class ApiAdapterGLink : public Component {
 
   void send_hello_();
   void send_auth_();
-  void send_heartbeat_();
+  void send_heartbeat_(const char *mode);
+  void send_session_event_(const char *phase, const char *reason, bool include_status);
   void send_response_(const std::string &command_id, const char *status, JsonObject body, const std::string &error = "");
   void send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source);
   bool send_frame_(const char *type, const char *peer, const std::string &id, std::function<void(JsonObject)> builder);
+  void build_full_status_(JsonObject body);
   void build_diagnostics_(JsonObject root) const;
   void set_state_(const char *state);
   void set_error_(const char *error);
@@ -75,7 +78,9 @@ class ApiAdapterGLink : public Component {
   std::string server_nonce_{};
   std::string event_level_{"basic"};
   uint32_t heartbeat_interval_ms_{20000};
+  uint32_t full_heartbeat_interval_ms_{300000};
   uint32_t last_heartbeat_ms_{0};
+  uint32_t last_full_heartbeat_ms_{0};
   uint32_t event_level_expires_ms_{0};
   uint32_t next_connect_ms_{0};
   uint32_t connect_started_ms_{0};

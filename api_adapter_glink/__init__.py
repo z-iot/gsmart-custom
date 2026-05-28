@@ -13,6 +13,7 @@ ApiAdapterGLink = api_adapter_glink_ns.class_("ApiAdapterGLink", cg.Component)
 CONF_API_CORE_ID = "api_core_id"
 CONF_PROMOSS_SECRET = "promoss_secret"
 CONF_HEARTBEAT_INTERVAL = "heartbeat_interval"
+CONF_FULL_HEARTBEAT_INTERVAL = "full_heartbeat_interval"
 CONF_TLS_CA_CERT = "tls_ca_cert"
 
 
@@ -32,6 +33,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_PROMOSS_SECRET): cv.string,
             cv.Optional(CONF_TLS_CA_CERT, default=""): cv.string,
             cv.Optional(CONF_HEARTBEAT_INTERVAL, default="20s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_FULL_HEARTBEAT_INTERVAL, default="5min"): cv.positive_time_period_milliseconds,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_arduino,
@@ -47,4 +49,5 @@ async def to_code(config):
     cg.add(var.set_promoss_secret(config[CONF_PROMOSS_SECRET]))
     cg.add(var.set_tls_ca_cert(config[CONF_TLS_CA_CERT]))
     cg.add(var.set_heartbeat_interval(config[CONF_HEARTBEAT_INTERVAL].total_milliseconds))
+    cg.add(var.set_full_heartbeat_interval(config[CONF_FULL_HEARTBEAT_INTERVAL].total_milliseconds))
     cg.add_library("links2004/WebSockets", "2.7.2")

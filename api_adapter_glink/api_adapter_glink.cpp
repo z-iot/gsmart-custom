@@ -134,7 +134,7 @@ void ApiAdapterGLink::loop() {
   if (!this->parsed_url_)
     return;
 
-  const uint32_t now = millis();
+  uint32_t now = millis();
   if (!network::is_connected()) {
     this->set_state_("waiting_network");
     if (this->started_)
@@ -157,6 +157,7 @@ void ApiAdapterGLink::loop() {
   }
 
   this->websocket_.loop();
+  now = millis();
 
   if (this->event_level_expires_ms_ != 0 && static_cast<int32_t>(now - this->event_level_expires_ms_) >= 0) {
     this->event_level_ = "basic";
@@ -171,8 +172,14 @@ void ApiAdapterGLink::loop() {
 
   if (this->authenticated_ && this->heartbeat_interval_ms_ > 0 &&
       now - this->last_heartbeat_ms_ >= this->heartbeat_interval_ms_) {
-    this->send_heartbeat_();
+    this->send_heartbeat_("basic");
     this->last_heartbeat_ms_ = now;
+  }
+
+  if (this->authenticated_ && this->full_heartbeat_interval_ms_ > 0 &&
+      now - this->last_full_heartbeat_ms_ >= this->full_heartbeat_interval_ms_) {
+    this->send_heartbeat_("full");
+    this->last_full_heartbeat_ms_ = now;
   }
 }
 
@@ -182,6 +189,7 @@ void ApiAdapterGLink::dump_config() {
   ESP_LOGCONFIG(TAG, "  TLS CA verification: %s", this->tls_ca_cert_.empty() ? "disabled" : "enabled");
   ESP_LOGCONFIG(TAG, "  Key ID/MAC: %s", this->device_mac_().c_str());
   ESP_LOGCONFIG(TAG, "  Heartbeat: %ums", this->heartbeat_interval_ms_);
+  ESP_LOGCONFIG(TAG, "  Full heartbeat: %ums", this->full_heartbeat_interval_ms_);
 }
 
 void ApiAdapterGLink::connect_() {
@@ -213,6 +221,9 @@ void ApiAdapterGLink::connect_() {
 
 void ApiAdapterGLink::stop_(const char *reason) {
   ESP_LOGW(TAG, "G-Link stopped: %s", reason);
+  if (this->connected_ && this->authenticated_) {
+    this->send_session_event_("ending", reason != nullptr ? reason : "stopped", true);
+  }
   this->set_state_("stopped");
   this->set_error_(reason);
   this->websocket_.disconnect();
@@ -288,6 +299,7 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->session_id_.clear();
       this->server_nonce_.clear();
       this->last_heartbeat_ms_ = millis();
+      this->last_full_heartbeat_ms_ = millis();
       ESP_LOGI(TAG, "G-Link websocket connected");
       this->send_hello_();
       break;
@@ -353,6 +365,8 @@ void ApiAdapterGLink::handle_challenge_(JsonObject payload) {
   this->set_state_("authenticated");
   this->last_error_.clear();
   ESP_LOGI(TAG, "G-Link device auth sent, session=%s", this->session_id_.c_str());
+  this->send_session_event_("started", "authenticated", true);
+  this->last_full_heartbeat_ms_ = millis();
 }
 
 void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payload) {
@@ -373,6 +387,9 @@ void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payl
   JsonObject response = response_doc.to<JsonObject>();
   std::string error = this->handle_gnode_command_(name, body, response);
   this->send_response_(command_id, error.empty() ? "ok" : "error", response, error);
+  if (error.empty() && name == "g-node.control.restart.set") {
+    this->send_session_event_("ending", "restart_requested", true);
+  }
 }
 
 std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, JsonObject body, JsonObject response) {
@@ -491,13 +508,33 @@ void ApiAdapterGLink::send_auth_() {
   });
 }
 
-void ApiAdapterGLink::send_heartbeat_() {
-  this->send_frame_("event", "device", this->next_frame_id_("hb"), [this](JsonObject payload) {
-    payload["kind"] = "device.heartbeat";
+void ApiAdapterGLink::send_heartbeat_(const char *mode) {
+  const bool full = strcmp(mode, "full") == 0;
+  this->send_frame_("heartbeat", "device", this->next_frame_id_("hb"), [this, full](JsonObject payload) {
+    payload["mode"] = full ? "full" : "basic";
     payload["level"] = "basic";
     JsonObject body = payload["body"].to<JsonObject>();
     body["uptimeSec"] = millis() / 1000;
     body["eventLevel"] = this->event_level_;
+    if (full)
+      this->build_full_status_(body);
+  });
+}
+
+void ApiAdapterGLink::send_session_event_(const char *phase, const char *reason, bool include_status) {
+  const bool ending = strcmp(phase, "ending") == 0;
+  this->send_frame_("event", "device", this->next_frame_id_("event"), [this, ending, reason, include_status](JsonObject payload) {
+    payload["kind"] = ending ? "device.session.ending" : "device.session.started";
+    payload["level"] = "basic";
+    JsonObject body = payload["body"].to<JsonObject>();
+    body["reason"] = reason != nullptr ? reason : "";
+    body["serial"] = this->device_serial_();
+    body["model"] = this->device_model_();
+    body["displayName"] = this->device_display_name_();
+    body["uptimeSec"] = millis() / 1000;
+    body["eventLevel"] = this->event_level_;
+    if (include_status)
+      this->build_full_status_(body);
   });
 }
 
@@ -528,6 +565,13 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
     body["serial"] = this->device_serial_();
     body["uptimeSec"] = millis() / 1000;
   });
+}
+
+void ApiAdapterGLink::build_full_status_(JsonObject body) {
+  JsonObject status = body["status"].to<JsonObject>();
+  this->core_->build_status(status);
+  JsonObject consumables = body["consumables"].to<JsonObject>();
+  this->core_->build_settings_consumables(consumables);
 }
 
 bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std::string &id,
@@ -579,6 +623,7 @@ void ApiAdapterGLink::build_diagnostics_(JsonObject root) const {
                                 ? static_cast<uint32_t>(this->next_connect_ms_ - now)
                                 : 0;
   root["heartbeatIntervalMs"] = this->heartbeat_interval_ms_;
+  root["fullHeartbeatIntervalMs"] = this->full_heartbeat_interval_ms_;
   root["lastRxType"] = this->last_rx_type_;
   root["lastTxType"] = this->last_tx_type_;
   root["lastProbeAgeMs"] = this->last_probe_ms_ == 0 ? 0 : now - this->last_probe_ms_;
@@ -587,6 +632,7 @@ void ApiAdapterGLink::build_diagnostics_(JsonObject root) const {
   root["lastRxAgeMs"] = this->last_rx_ms_ == 0 ? 0 : now - this->last_rx_ms_;
   root["lastTxAgeMs"] = this->last_tx_ms_ == 0 ? 0 : now - this->last_tx_ms_;
   root["lastAuthAgeMs"] = this->last_auth_ms_ == 0 ? 0 : now - this->last_auth_ms_;
+  root["lastFullHeartbeatAgeMs"] = this->last_full_heartbeat_ms_ == 0 ? 0 : now - this->last_full_heartbeat_ms_;
 }
 
 void ApiAdapterGLink::set_state_(const char *state) {
