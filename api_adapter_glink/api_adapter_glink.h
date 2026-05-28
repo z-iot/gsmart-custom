@@ -53,6 +53,9 @@ class ApiAdapterGLink : public Component {
                       const std::string &error = "");
   void send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source);
   bool send_frame_(const char *type, const char *peer, const std::string &id, std::function<void(JsonObject)> builder);
+  void build_diagnostics_(JsonObject root) const;
+  void set_state_(const char *state);
+  void set_error_(const char *error);
 
   std::string device_serial_() const;
   std::string device_mac_() const;
@@ -76,10 +79,23 @@ class ApiAdapterGLink : public Component {
   uint32_t connect_started_ms_{0};
   uint32_t frame_seq_{0};
   uint32_t reconnect_interval_ms_{60000};
+  uint32_t probe_attempts_{0};
+  uint32_t connect_attempts_{0};
+  uint32_t last_probe_ms_{0};
+  uint32_t last_connect_ms_{0};
+  uint32_t last_connected_ms_{0};
+  uint32_t last_rx_ms_{0};
+  uint32_t last_tx_ms_{0};
+  uint32_t last_auth_ms_{0};
   bool parsed_url_{false};
   bool started_{false};
   bool connected_{false};
   bool authenticated_{false};
+  bool last_probe_ok_{false};
+  std::string state_{"init"};
+  std::string last_error_{};
+  std::string last_rx_type_{};
+  std::string last_tx_type_{};
 };
 
 }  // namespace api_adapter_glink

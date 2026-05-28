@@ -6,6 +6,7 @@
 #include "esphome/core/automation.h"
 #include <string>
 #include <functional>
+#include <utility>
 
 namespace esphome {
 namespace api_core_v1 {
@@ -28,6 +29,9 @@ class ApiCoreV1 : public Component {
   void build_info(JsonObject root);
   void build_status(JsonObject root);
   void build_diagnostics(JsonObject root);
+  void set_glink_diagnostics_provider(std::function<void(JsonObject)> provider) {
+    this->glink_diagnostics_provider_ = std::move(provider);
+  }
   void build_consumption(JsonObject root);
 
   // Network
@@ -82,6 +86,7 @@ class ApiCoreV1 : public Component {
 
   CallbackManager<void(IdentifyRequest)> identify_callback_{};
   std::string firmware_version_{};
+  std::function<void(JsonObject)> glink_diagnostics_provider_{};
 };
 
 class IdentifyTrigger : public Trigger<IdentifyRequest> {

@@ -62,22 +62,28 @@ std::string json_error(JsonObject response, const char *fallback) {
 void ApiAdapterGLink::setup() {
   if (this->core_ == nullptr || storage::store == nullptr) {
     ESP_LOGE(TAG, "API core or storage is not available");
+    this->set_error_("api_core_or_storage_missing");
     this->mark_failed();
     return;
   }
+  this->core_->set_glink_diagnostics_provider([this](JsonObject root) { this->build_diagnostics_(root); });
+
   if (this->url_.empty() || this->key_id_.empty() || this->secret_.empty()) {
     ESP_LOGE(TAG, "G-Link url, key_id and secret are required");
+    this->set_error_("missing_config");
     this->mark_failed();
     return;
   }
 
   if (!this->parse_url_(&this->parsed_)) {
     ESP_LOGE(TAG, "Invalid G-Link url: %s", this->url_.c_str());
+    this->set_error_("invalid_url");
     this->mark_failed();
     return;
   }
   this->parsed_url_ = true;
   this->next_connect_ms_ = millis() + 15000;
+  this->set_state_("waiting_initial_delay");
 
   storage::store->add_on_radiation_applied(
       [this](storage::RadiationMode mode, storage::RadiationSource source) { this->send_radiation_event_(mode, source); });
@@ -90,14 +96,18 @@ void ApiAdapterGLink::loop() {
 
   const uint32_t now = millis();
   if (!network::is_connected()) {
+    this->set_state_("waiting_network");
     if (this->started_)
       this->stop_("network disconnected");
     return;
   }
 
   if (!this->started_) {
-    if (static_cast<int32_t>(now - this->next_connect_ms_) < 0)
+    if (static_cast<int32_t>(now - this->next_connect_ms_) < 0) {
+      this->set_state_("waiting_retry");
       return;
+    }
+    this->set_state_("probing_gateway");
     if (!this->probe_gateway_()) {
       this->next_connect_ms_ = now + this->reconnect_interval_ms_;
       return;
@@ -128,6 +138,10 @@ void ApiAdapterGLink::dump_config() {
 }
 
 void ApiAdapterGLink::connect_() {
+  this->connect_attempts_++;
+  this->last_connect_ms_ = millis();
+  this->set_state_("connecting");
+  this->last_error_.clear();
   this->websocket_.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
     this->on_websocket_event_(type, payload, length);
   });
@@ -146,6 +160,8 @@ void ApiAdapterGLink::connect_() {
 
 void ApiAdapterGLink::stop_(const char *reason) {
   ESP_LOGW(TAG, "G-Link stopped: %s", reason);
+  this->set_state_("stopped");
+  this->set_error_(reason);
   this->websocket_.disconnect();
   this->started_ = false;
   this->connected_ = false;
@@ -155,12 +171,21 @@ void ApiAdapterGLink::stop_(const char *reason) {
 }
 
 bool ApiAdapterGLink::probe_gateway_() {
+  this->probe_attempts_++;
+  this->last_probe_ms_ = millis();
   WiFiClient probe;
   probe.setConnectionTimeout(750);
   const bool ok = probe.connect(this->parsed_.host.c_str(), this->parsed_.port, 750);
   probe.stop();
-  if (!ok)
+  this->last_probe_ok_ = ok;
+  if (!ok) {
+    this->set_state_("gateway_unavailable");
+    this->set_error_("gateway_probe_failed");
     ESP_LOGW(TAG, "G-Link gateway unavailable, retrying later");
+  } else {
+    this->set_state_("gateway_probe_ok");
+    this->last_error_.clear();
+  }
   return ok;
 }
 
@@ -198,6 +223,9 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->connected_ = true;
       this->authenticated_ = false;
       this->connect_started_ms_ = 0;
+      this->last_connected_ms_ = millis();
+      this->set_state_("websocket_connected");
+      this->last_error_.clear();
       this->client_nonce_ = this->random_hex_(16);
       this->session_id_.clear();
       this->server_nonce_.clear();
@@ -208,6 +236,8 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
     case WStype_DISCONNECTED:
       this->connected_ = false;
       this->authenticated_ = false;
+      this->set_state_("websocket_disconnected");
+      this->set_error_("websocket_disconnected");
       ESP_LOGW(TAG, "G-Link websocket disconnected");
       this->started_ = false;
       this->connect_started_ms_ = 0;
@@ -217,6 +247,8 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->handle_text_(std::string(reinterpret_cast<const char *>(payload), length));
       break;
     case WStype_ERROR:
+      this->set_state_("websocket_error");
+      this->set_error_("websocket_error");
       ESP_LOGW(TAG, "G-Link websocket error");
       break;
     default:
@@ -225,9 +257,11 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
 }
 
 void ApiAdapterGLink::handle_text_(const std::string &text) {
+  this->last_rx_ms_ = millis();
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, text);
   if (err) {
+    this->set_error_("frame_decode_failed");
     ESP_LOGW(TAG, "Failed to decode G-Link frame: %s", err.c_str());
     return;
   }
@@ -235,6 +269,7 @@ void ApiAdapterGLink::handle_text_(const std::string &text) {
   JsonObject frame = doc.as<JsonObject>();
   const char *type = frame["type"] | "";
   const char *ref_id = frame["id"] | "";
+  this->last_rx_type_ = type;
   JsonObject payload = frame["payload"].as<JsonObject>();
 
   if (strcmp(type, "challenge") == 0) {
@@ -243,6 +278,8 @@ void ApiAdapterGLink::handle_text_(const std::string &text) {
     this->handle_command_(ref_id, payload);
   } else if (strcmp(type, "error") == 0) {
     const char *code = payload["code"] | "glink_error";
+    this->set_state_("server_error");
+    this->set_error_(code);
     ESP_LOGW(TAG, "G-Link error frame: %s", code);
   }
 }
@@ -251,11 +288,15 @@ void ApiAdapterGLink::handle_challenge_(JsonObject payload) {
   this->session_id_ = payload["sessionId"].as<std::string>();
   this->server_nonce_ = payload["serverNonce"].as<std::string>();
   if (this->session_id_.empty() || this->server_nonce_.empty()) {
+    this->set_error_("invalid_challenge");
     ESP_LOGW(TAG, "Invalid G-Link challenge");
     return;
   }
   this->send_auth_();
   this->authenticated_ = true;
+  this->last_auth_ms_ = millis();
+  this->set_state_("authenticated");
+  this->last_error_.clear();
   ESP_LOGI(TAG, "G-Link device auth sent, session=%s", this->session_id_.c_str());
 }
 
@@ -263,6 +304,7 @@ void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payl
   const std::string command_id = payload["commandId"].as<std::string>();
   const std::string name = payload["name"].as<std::string>();
   if (ref_id.empty() || command_id.empty() || name.empty()) {
+    this->set_error_("invalid_command_frame");
     ESP_LOGW(TAG, "Invalid G-Link command frame");
     return;
   }
@@ -433,8 +475,10 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
 
 bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std::string &id,
                                   std::function<void(JsonObject)> builder) {
-  if (!this->connected_)
+  if (!this->connected_) {
+    this->set_error_("send_not_connected");
     return false;
+  }
 
   JsonDocument doc;
   JsonObject root = doc.to<JsonObject>();
@@ -448,7 +492,51 @@ bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std:
 
   std::string out;
   serializeJson(doc, out);
-  return this->websocket_.sendTXT(out.c_str(), out.length());
+  const bool ok = this->websocket_.sendTXT(out.c_str(), out.length());
+  this->last_tx_ms_ = millis();
+  this->last_tx_type_ = type;
+  if (!ok)
+    this->set_error_("send_failed");
+  return ok;
+}
+
+void ApiAdapterGLink::build_diagnostics_(JsonObject root) const {
+  const uint32_t now = millis();
+  root["enabled"] = this->parsed_url_;
+  root["state"] = this->state_;
+  root["lastError"] = this->last_error_;
+  root["url"] = this->url_;
+  root["host"] = this->parsed_.host;
+  root["port"] = this->parsed_.port;
+  root["path"] = this->parsed_.path;
+  root["secure"] = this->parsed_.secure;
+  root["networkConnected"] = network::is_connected();
+  root["started"] = this->started_;
+  root["connected"] = this->connected_;
+  root["authenticated"] = this->authenticated_;
+  root["probeAttempts"] = this->probe_attempts_;
+  root["connectAttempts"] = this->connect_attempts_;
+  root["lastProbeOk"] = this->last_probe_ok_;
+  root["nextConnectInMs"] = static_cast<int32_t>(this->next_connect_ms_ - now) > 0
+                                ? static_cast<uint32_t>(this->next_connect_ms_ - now)
+                                : 0;
+  root["heartbeatIntervalMs"] = this->heartbeat_interval_ms_;
+  root["lastRxType"] = this->last_rx_type_;
+  root["lastTxType"] = this->last_tx_type_;
+  root["lastProbeAgeMs"] = this->last_probe_ms_ == 0 ? 0 : now - this->last_probe_ms_;
+  root["lastConnectAgeMs"] = this->last_connect_ms_ == 0 ? 0 : now - this->last_connect_ms_;
+  root["lastConnectedAgeMs"] = this->last_connected_ms_ == 0 ? 0 : now - this->last_connected_ms_;
+  root["lastRxAgeMs"] = this->last_rx_ms_ == 0 ? 0 : now - this->last_rx_ms_;
+  root["lastTxAgeMs"] = this->last_tx_ms_ == 0 ? 0 : now - this->last_tx_ms_;
+  root["lastAuthAgeMs"] = this->last_auth_ms_ == 0 ? 0 : now - this->last_auth_ms_;
+}
+
+void ApiAdapterGLink::set_state_(const char *state) {
+  this->state_ = state != nullptr ? state : "";
+}
+
+void ApiAdapterGLink::set_error_(const char *error) {
+  this->last_error_ = error != nullptr ? error : "";
 }
 
 std::string ApiAdapterGLink::device_serial_() const {

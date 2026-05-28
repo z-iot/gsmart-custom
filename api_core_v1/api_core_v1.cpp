@@ -511,6 +511,11 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
   JsonObject wifi = root["wifi"].to<JsonObject>();
   add_wifi_runtime(wifi);
 
+  if (this->glink_diagnostics_provider_) {
+    JsonObject glink = root["glink"].to<JsonObject>();
+    this->glink_diagnostics_provider_(glink);
+  }
+
   add_lamps_status(root);
   add_motion_status(root);
   add_error_status(root);
