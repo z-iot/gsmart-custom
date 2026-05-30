@@ -410,6 +410,101 @@ namespace esphome
       ESP_LOGD(TAG, "HTTP update completed; URL: %s; Code: %d", this->url_.c_str(), http_code);
     }
 
+    bool HttpUpdateComponent::flash_to_backend(OTABackend *backend, std::function<void(size_t, size_t)> progress)
+    {
+      if (backend == nullptr)
+      {
+        ESP_LOGW(TAG, "HTTP update sink is not ready");
+        return false;
+      }
+      if (!network::is_connected())
+      {
+        this->client_.end();
+        this->status_set_warning();
+        ESP_LOGW(TAG, "HTTP update failed; Not connected to network");
+        return false;
+      }
+
+      bool begin_status = false;
+      const String url = this->url_.c_str();
+#if defined(USE_ESP32) || (defined(USE_ESP8266) && USE_ARDUINO_VERSION_CODE >= VERSION_CODE(2, 6, 0))
+#if defined(USE_ESP32) || USE_ARDUINO_VERSION_CODE >= VERSION_CODE(2, 7, 0)
+      if (this->follow_redirects_)
+      {
+        this->client_.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+      }
+      else
+      {
+        this->client_.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+      }
+#else
+      this->client_.setFollowRedirects(this->follow_redirects_);
+#endif
+      this->client_.setRedirectLimit(this->redirect_limit_);
+#endif
+#if defined(USE_ESP32)
+      begin_status = this->client_.begin(url);
+#elif defined(USE_ESP8266)
+      begin_status = this->client_.begin(*this->get_wifi_client_(), url);
+#endif
+
+      if (!begin_status)
+      {
+        this->client_.end();
+        this->status_set_warning();
+        ESP_LOGW(TAG, "HTTP update sink failed at begin phase");
+        return false;
+      }
+
+      this->client_.setTimeout(this->timeout_);
+      if (this->useragent_ != nullptr)
+      {
+        this->client_.setUserAgent(this->useragent_);
+      }
+      for (const auto &header : this->headers_)
+      {
+        this->client_.addHeader(header.name, header.value, false, true);
+      }
+      this->client_.addHeader("Cache-Control", "no-cache");
+
+      int http_code = this->client_.GET();
+      int http_len = this->client_.getSize();
+      if (http_code < 0)
+      {
+        ESP_LOGW(TAG, "HTTP update sink failed; URL: %s; Error: %s", this->url_.c_str(),
+                 HTTPClient::errorToString(http_code).c_str());
+        this->status_set_warning();
+        this->client_.end();
+        return false;
+      }
+      if (http_code < 200 || http_code >= 300)
+      {
+        ESP_LOGW(TAG, "HTTP update sink failed; URL: %s; Code: %d", this->url_.c_str(), http_code);
+        this->status_set_warning();
+        this->client_.end();
+        return false;
+      }
+      if (http_len <= 0)
+      {
+        ESP_LOGW(TAG, "HTTP update sink Content-Length was 0 or missing");
+        this->status_set_warning();
+        this->client_.end();
+        return false;
+      }
+
+      WiFiClient *tcp = this->client_.getStreamPtr();
+      delay(100);
+      const bool ok = this->stream_to_backend_(*tcp, static_cast<uint32_t>(http_len), this->client_.header("x-MD5"), backend, progress);
+      this->client_.end();
+      if (!ok)
+      {
+        this->status_set_warning();
+        return false;
+      }
+      this->status_clear_warning();
+      return true;
+    }
+
 #ifdef USE_ESP8266
     std::shared_ptr<WiFiClient> HttpUpdateComponent::get_wifi_client_()
     {
@@ -455,69 +550,11 @@ namespace esphome
       return str.c_str();
     }
 
-    bool HttpUpdateComponent::runUpdate(Stream &fw_stream, uint32_t ota_size, String md5)
+    bool HttpUpdateComponent::stream_to_backend_(Stream &fw_stream, uint32_t ota_size, String md5, OTABackend *backend,
+                                                 std::function<void(size_t, size_t)> progress)
     {
-      std::unique_ptr<OTABackend> backend;
-      backend = make_ota_backend();
-
-      // StreamString error;
-
-      // if (_cbProgress)
-      // {
-      //   Update.onProgress(_cbProgress);
-      // }
-
-      // if (!Update.begin(size, command, _ledPin, _ledOn))
-      // {
-      //   _lastError = Update.getError();
-      //   Update.printError(error);
-      //   error.trim(); // remove line ending
-      //   log_e("Update.begin failed! (%s)\n", error.c_str());
-      //   return false;
-      // }
-
-      // if (_cbProgress)
-      // {
-      //   _cbProgress(0, size);
-      // }
-
-      // if (md5.length())
-      // {
-      //   if (!Update.setMD5(md5.c_str()))
-      //   {
-      //     _lastError = HTTP_UE_SERVER_FAULTY_MD5;
-      //     log_e("Update.setMD5 failed! (%s)\n", md5.c_str());
-      //     return false;
-      //   }
-      // }
-
-      // // To do: the SHA256 could be checked if the server sends it
-
-      // if (Update.writeStream(in) != size)
-      // {
-      //   _lastError = Update.getError();
-      //   Update.printError(error);
-      //   error.trim(); // remove line ending
-      //   log_e("Update.writeStream failed! (%s)\n", error.c_str());
-      //   return false;
-      // }
-
-      // if (_cbProgress)
-      // {
-      //   _cbProgress(size, size);
-      // }
-
-      // if (!Update.end())
-      // {
-      //   _lastError = Update.getError();
-      //   Update.printError(error);
-      //   error.trim(); // remove line ending
-      //   log_e("Update.end failed! (%s)\n", error.c_str());
-      //   return false;
-      // }
-
-      // return true;
-
+      if (backend == nullptr)
+        return false;
       OTAResponseTypes error_code = OTA_RESPONSE_ERROR_UNKNOWN;
       size_t total = 0;
       uint8_t buf[1024];
@@ -529,7 +566,8 @@ namespace esphome
         goto error; // NOLINT(cppcoreguidelines-avoid-goto)
       ESP_LOGW(TAG, "Http Update begin. FwSize: %d", ota_size);
 
-      // backend->set_update_md5(md5.c_str());
+      if (md5.length() == 32)
+        backend->set_update_md5(md5.c_str());
 
       while (total < ota_size)
       {
@@ -577,6 +615,8 @@ namespace esphome
 #ifdef USE_HTTPUPDATE_STATE_CALLBACK
           this->state_callback_.call(OTA_IN_PROGRESS, percentage, 0);
 #endif
+          if (progress)
+            progress(total, ota_size);
           // feed watchdog and give other tasks a chance to run
           App.feed_wdt();
           yield();
@@ -596,14 +636,12 @@ namespace esphome
 #ifdef USE_HTTPUPDATE_STATE_CALLBACK
       this->state_callback_.call(OTA_COMPLETED, 100.0f, 0);
 #endif
-      delay(100); // NOLINT
-      App.safe_reboot();
+      if (progress)
+        progress(total, ota_size);
+      return true;
 
     error:
-      if (backend != nullptr)
-      {
-        backend->abort();
-      }
+      backend->abort();
 
       this->status_momentary_error("onerror", 5000);
 #ifdef USE_HTTPUPDATE_STATE_CALLBACK
@@ -611,6 +649,13 @@ namespace esphome
 #endif
 
       return false;
+    }
+
+    bool HttpUpdateComponent::runUpdate(Stream &fw_stream, uint32_t ota_size, String md5)
+    {
+      std::unique_ptr<OTABackend> backend;
+      backend = make_ota_backend();
+      return this->stream_to_backend_(fw_stream, ota_size, md5, backend.get(), nullptr);
     }
 
   }

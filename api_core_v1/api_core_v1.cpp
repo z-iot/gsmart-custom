@@ -21,6 +21,10 @@
 #include "esphome/components/http_update/http_update.h"
 #endif
 
+#ifdef USE_GSMART_OTA_PUSH
+#include "esphome/components/ota_push/ota_push.h"
+#endif
+
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
 #endif
@@ -137,6 +141,19 @@ std::string json_string(JsonVariant value, const std::string &fallback = "") {
   return value.as<std::string>();
 }
 
+uint32_t json_uint32(JsonVariant value, uint32_t fallback = 0) {
+  if (value.isNull())
+    return fallback;
+  if (value.is<uint32_t>())
+    return value.as<uint32_t>();
+  if (value.is<int32_t>()) {
+    const int32_t parsed = value.as<int32_t>();
+    return parsed > 0 ? static_cast<uint32_t>(parsed) : fallback;
+  }
+  const uint32_t parsed = static_cast<uint32_t>(std::strtoul(value.as<std::string>().c_str(), nullptr, 10));
+  return parsed > 0 ? parsed : fallback;
+}
+
 JsonVariant nested_value(JsonObject root, const char *object_key, const char *field_key) {
   if (!root[object_key].is<JsonObject>())
     return JsonVariant();
@@ -165,6 +182,43 @@ std::string normalize_firmware_target_mode(JsonObject root) {
     return "lanIp";
   return mode;
 }
+
+uint16_t firmware_ota_port_from_model(uint8_t model_num) {
+  return model_num == 51 ? 8266 : 3232;
+}
+
+#if defined(USE_GSMART_OTA_PUSH) && defined(GSMART_EMITTER) && defined(USE_UDPSERVER)
+struct FirmwareTargetResolution {
+  std::string ip;
+  uint16_t port{3232};
+};
+
+std::string device_serial_from_mac(const uint8_t mac[6]) {
+  return str_sprintf("%02x%02x%02x", mac[3], mac[4], mac[5]);
+}
+
+bool serial_matches_mac_tail(const std::string &serial, const uint8_t mac[6]) {
+  const std::string clean = normalize_mac_token(serial);
+  const std::string tail = device_serial_from_mac(mac);
+  return clean == tail || (clean.size() >= tail.size() && clean.substr(clean.size() - tail.size()) == tail);
+}
+
+FirmwareTargetResolution resolve_region_member_target(const std::string &target_serial) {
+  FirmwareTargetResolution result;
+  if (udp_server::udpServer == nullptr || target_serial.empty())
+    return result;
+
+  for (size_t i = 0; i < udp_server::udpServer->GlobalDevices.ItemsCount; i++) {
+    auto *item = udp_server::udpServer->GlobalDevices.Items[i];
+    if (item == nullptr || !serial_matches_mac_tail(target_serial, item->mac))
+      continue;
+    result.ip = str_sprintf("%u.%u.%u.%u", item->ip[0], item->ip[1], item->ip[2], item->ip[3]);
+    result.port = firmware_ota_port_from_model(item->model);
+    return result;
+  }
+  return result;
+}
+#endif
 
 bool require_confirmation(JsonObject root, JsonObject response, const char *expected) {
   if (json_string(root["confirm"]) == expected)
@@ -464,6 +518,8 @@ void ApiCoreV1::build_info(JsonObject root) {
 
 void ApiCoreV1::build_status(JsonObject root) {
   const auto active_mode = storage::store->global->radiation.activeMode;
+  const std::string build = this->get_build_code_();
+  const std::string firmware_version = this->get_firmware_version_();
   root["model"] = storage::store->get_model();
   root["serial"] = storage::store->get_serial();
   root["mode"] = radiation_mode_to_api(active_mode);
@@ -473,6 +529,9 @@ void ApiCoreV1::build_status(JsonObject root) {
   root["lastStopSec"] = storage::store->global->radiation.lastStop;
   root["remainingSec"] = storage::store->getTimerDurationSec(time(nullptr));
   root["uptimeSec"] = millis() / 1000;
+  JsonObject firmware = root["firmware"].to<JsonObject>();
+  firmware["build"] = build;
+  firmware["version"] = firmware_version;
 
   add_wifi_runtime(root);
   add_lamps_status(root);
@@ -1135,6 +1194,30 @@ void ApiCoreV1::handle_restart(JsonObject root, JsonObject response) {
   response["delayMs"] = RESTART_DELAY_MS;
 }
 
+void ApiCoreV1::emit_firmware_event_(const char *phase, const std::string &role, const std::string &target_serial,
+                                     const std::string &target_ip, const std::string &version,
+                                     const std::string &file_id, const std::string &release_id, uint32_t file_size,
+                                     uint32_t bytes_sent, const char *error) {
+  if (!this->firmware_event_emitter_)
+    return;
+
+  JsonDocument doc;
+  JsonObject body = doc.to<JsonObject>();
+  body["role"] = role;
+  body["targetSerial"] = target_serial;
+  body["targetIp"] = target_ip;
+  body["version"] = version;
+  body["fileId"] = file_id;
+  body["releaseId"] = release_id;
+  body["fileSize"] = file_size;
+  body["bytesSent"] = bytes_sent;
+  if (file_size > 0 && bytes_sent <= file_size)
+    body["percent"] = static_cast<uint32_t>((static_cast<uint64_t>(bytes_sent) * 100ULL) / file_size);
+  if (error != nullptr && error[0] != 0)
+    body["error"] = error;
+  this->firmware_event_emitter_(phase, body);
+}
+
 void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
   const std::string target_mode = normalize_firmware_target_mode(root);
   const bool dry_run = json_bool(root["dryRun"], json_bool(nested_value(root, "options", "dryRun"), false));
@@ -1143,6 +1226,9 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
   const std::string version = json_string_any(root, "version", "firmware", "version");
   const std::string file_id = json_string_any(root, "fileId", "firmware", "fileId");
   const std::string release_id = json_string_any(root, "releaseId", "firmware", "releaseId");
+  const std::string md5 = json_string_any(root, "md5", "firmware", "md5");
+  const std::string ota_password = json_string_any(root, "otaPassword", "firmware", "otaPassword");
+  const uint32_t file_size = json_uint32(root["fileSize"], json_uint32(nested_value(root, "firmware", "fileSize"), 0));
   const std::string target_serial = json_string_any(root, "targetSerial", "target", "serial");
   const std::string target_ip = json_string_any(root, "targetIp", "target", "ip");
 
@@ -1158,6 +1244,9 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
   firmware["version"] = version;
   firmware["fileId"] = file_id;
   firmware["releaseId"] = release_id;
+  firmware["fileSize"] = file_size;
+  firmware["md5"] = md5;
+  firmware["otaPasswordConfigured"] = !ota_password.empty();
 
   JsonObject target = response["target"].to<JsonObject>();
   target["mode"] = target_mode;
@@ -1190,6 +1279,7 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
     }
 
     const std::string update_url = url;
+    this->emit_firmware_event_("started", "self", target_serial, target_ip, version, file_id, release_id, file_size, 0);
     this->set_timeout("api_firmware_update_self", 250, [update_url]() {
       std::vector<http_update::HttpUpdateResponseTrigger *> triggers;
       http_update::global_http_update->set_url(update_url);
@@ -1230,11 +1320,130 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
       return;
     }
 
+#if defined(USE_GSMART_OTA_PUSH) && defined(GSMART_EMITTER)
+    if (url.empty()) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "missing_firmware_url";
+      response["message"] = "Delegated firmware update requires firmware.url or url.";
+      this->emit_firmware_event_("failed", "master", target_serial, target_ip, version, file_id, release_id, file_size, 0,
+                                 "missing_firmware_url");
+      return;
+    }
+    if (md5.length() != 32) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "missing_firmware_md5";
+      response["message"] = "Delegated ESPHome OTA requires firmware.md5.";
+      this->emit_firmware_event_("failed", "master", target_serial, target_ip, version, file_id, release_id, file_size, 0,
+                                 "missing_firmware_md5");
+      return;
+    }
+    if (ota_push::global_ota_push == nullptr) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "ota_push_not_ready";
+      response["message"] = "Delegated OTA push component is not ready.";
+      this->emit_firmware_event_("failed", "master", target_serial, target_ip, version, file_id, release_id, file_size, 0,
+                                 "ota_push_not_ready");
+      return;
+    }
+
+    std::string resolved_ip = target_ip;
+    uint16_t target_port = static_cast<uint16_t>(json_uint32(root["otaPort"], json_uint32(nested_value(root, "target", "otaPort"), 0)));
+#if defined(USE_UDPSERVER)
+    if (resolved_ip.empty() && target_mode == "regionMember") {
+      const FirmwareTargetResolution resolution = resolve_region_member_target(target_serial);
+      resolved_ip = resolution.ip;
+      if (target_port == 0)
+        target_port = resolution.port;
+    }
+#endif
+    if (target_port == 0)
+      target_port = 3232;
+    if (resolved_ip.empty()) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "member_ip_unresolved";
+      response["message"] = "Target IP is not known from the command or recent UDP region map.";
+      this->emit_firmware_event_("failed", "master", target_serial, target_ip, version, file_id, release_id, file_size, 0,
+                                 "member_ip_unresolved");
+      return;
+    }
+
+    static constexpr uint32_t MIN_DELEGATED_OTA_HEAP = 55000;
+    if (ESP.getFreeHeap() < MIN_DELEGATED_OTA_HEAP) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "low_heap";
+      response["freeHeap"] = ESP.getFreeHeap();
+      response["message"] = "Not enough free heap for concurrent G-Link, HTTPS download and OTA push.";
+      this->emit_firmware_event_("failed", "master", target_serial, resolved_ip, version, file_id, release_id, file_size, 0,
+                                 "low_heap");
+      return;
+    }
+
+    response["accepted"] = true;
+    response["scheduled"] = true;
+    response["delayMs"] = 250;
+    target["ip"] = resolved_ip;
+    target["otaPort"] = target_port;
+
+    const std::string update_url = url;
+    const std::string wire_md5 = md5;
+    const std::string password = ota_password;
+    const std::string scheduled_target_serial = target_serial;
+    const std::string scheduled_target_ip = resolved_ip;
+    const std::string scheduled_version = version;
+    const std::string scheduled_file_id = file_id;
+    const std::string scheduled_release_id = release_id;
+    const uint32_t scheduled_file_size = file_size;
+    this->emit_firmware_event_("started", "master", scheduled_target_serial, scheduled_target_ip, scheduled_version,
+                               scheduled_file_id, scheduled_release_id, scheduled_file_size, 0);
+    this->set_timeout("api_firmware_update_delegated", 250,
+                      [this, update_url, wire_md5, password, scheduled_target_ip, target_port, scheduled_target_serial,
+                       scheduled_version, scheduled_file_id, scheduled_release_id, scheduled_file_size]() {
+                        ota_push::OtaPushRequest request;
+                        request.url = update_url;
+                        request.target_ip = scheduled_target_ip;
+                        request.target_port = target_port;
+                        request.md5 = wire_md5;
+                        request.ota_password = password;
+                        uint32_t last_event_ms = 0;
+                        uint32_t last_percent = 0;
+                        const bool ok = ota_push::global_ota_push->push_url(request, [this, scheduled_target_serial,
+                                                                                       scheduled_target_ip, scheduled_version,
+                                                                                       scheduled_file_id,
+                                                                                       scheduled_release_id,
+                                                                                       scheduled_file_size, &last_event_ms,
+                                                                                       &last_percent](size_t sent, size_t total) {
+                          const uint32_t now = millis();
+                          const uint32_t effective_total = total > 0 ? static_cast<uint32_t>(total) : scheduled_file_size;
+                          const uint32_t percent =
+                              effective_total > 0 ? static_cast<uint32_t>((static_cast<uint64_t>(sent) * 100ULL) / effective_total) : 0;
+                          if (now - last_event_ms < 1000 && percent < last_percent + 5 && sent < total)
+                            return;
+                          last_event_ms = now;
+                          last_percent = percent;
+                          this->emit_firmware_event_("progress", "master", scheduled_target_serial, scheduled_target_ip,
+                                                     scheduled_version, scheduled_file_id, scheduled_release_id, effective_total,
+                                                     static_cast<uint32_t>(sent));
+                        });
+                        const char *error = ok ? nullptr : ota_push::global_ota_push->last_error().c_str();
+                        this->emit_firmware_event_(ok ? "completed" : "failed", "master", scheduled_target_serial,
+                                                   scheduled_target_ip, scheduled_version, scheduled_file_id,
+                                                   scheduled_release_id, scheduled_file_size, ok ? scheduled_file_size : 0, error);
+                      });
+    return;
+#else
     response["ok"] = false;
     response["accepted"] = false;
-    response["error"] = "delegated_ota_not_implemented";
-    response["message"] = "Delegated region/LAN OTA proxy is recognized but not implemented in this firmware build yet.";
+    response["error"] = "delegated_ota_unsupported_on_this_model";
+    response["message"] = "This firmware build cannot proxy delegated OTA updates.";
+    this->emit_firmware_event_("failed", "master", target_serial, target_ip, version, file_id, release_id, file_size, 0,
+                               "delegated_ota_unsupported_on_this_model");
     return;
+#endif
   }
 
   response["ok"] = false;

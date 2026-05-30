@@ -32,6 +32,9 @@ class ApiCoreV1 : public Component {
   void set_glink_diagnostics_provider(std::function<void(JsonObject)> provider) {
     this->glink_diagnostics_provider_ = std::move(provider);
   }
+  void set_firmware_event_emitter(std::function<void(const char *, JsonObject)> emitter) {
+    this->firmware_event_emitter_ = std::move(emitter);
+  }
   void build_consumption(JsonObject root);
 
   // Network
@@ -84,10 +87,15 @@ class ApiCoreV1 : public Component {
   std::string get_firmware_version_() const;
   std::string get_device_name_() const;
   void sync_preferences_now_() const;
+  void emit_firmware_event_(const char *phase, const std::string &role, const std::string &target_serial,
+                            const std::string &target_ip, const std::string &version, const std::string &file_id,
+                            const std::string &release_id, uint32_t file_size, uint32_t bytes_sent,
+                            const char *error = nullptr);
 
   CallbackManager<void(IdentifyRequest)> identify_callback_{};
   std::string firmware_version_{};
   std::function<void(JsonObject)> glink_diagnostics_provider_{};
+  std::function<void(const char *, JsonObject)> firmware_event_emitter_{};
 };
 
 class IdentifyTrigger : public Trigger<IdentifyRequest> {

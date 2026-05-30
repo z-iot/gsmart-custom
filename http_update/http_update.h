@@ -8,6 +8,8 @@
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/automation.h"
+#include "ota_backend.h"
+#include <functional>
 #include <list>
 #include <map>
 #include <utility>
@@ -71,12 +73,15 @@ class HttpUpdateComponent : public Component {
   void set_redirect_limit(uint16_t limit) { this->redirect_limit_ = limit; }
   void set_headers(std::list<Header> headers) { this->headers_ = std::move(headers); }
   void flash(const std::vector<HttpUpdateResponseTrigger *> &response_triggers);
+  bool flash_to_backend(OTABackend *backend, std::function<void(size_t, size_t)> progress = nullptr);
   void close();
   const char *get_string();
   void set_fwver(const std::string &fwver) { fwver_ = fwver; }
 
  protected:
   bool runUpdate(Stream &fw_stream, uint32_t ota_size, String md5);
+  bool stream_to_backend_(Stream &fw_stream, uint32_t ota_size, String md5, OTABackend *backend,
+                          std::function<void(size_t, size_t)> progress);
   void write_rtc_(uint32_t val);
   uint32_t read_rtc_();
 

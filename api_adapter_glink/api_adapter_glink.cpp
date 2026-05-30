@@ -107,6 +107,7 @@ void ApiAdapterGLink::setup() {
     return;
   }
   this->core_->set_glink_diagnostics_provider([this](JsonObject root) { this->build_diagnostics_(root); });
+  this->core_->set_firmware_event_emitter([this](const char *phase, JsonObject body) { this->send_firmware_event_(phase, body); });
 
   if (this->url_.empty() || this->promoss_secret_.empty()) {
     ESP_LOGE(TAG, "G-Link url and promoss_secret are required");
@@ -569,6 +570,22 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
     body["source"] = storage::radiationSourceToApi(source);
     body["serial"] = this->device_serial_();
     body["uptimeSec"] = millis() / 1000;
+  });
+}
+
+void ApiAdapterGLink::send_firmware_event_(const char *phase, JsonObject body) {
+  if (!this->authenticated_)
+    return;
+
+  const char *safe_phase = phase != nullptr && phase[0] != 0 ? phase : "progress";
+  this->send_frame_("event", "device", this->next_frame_id_("event"), [this, safe_phase, body](JsonObject payload) {
+    payload["kind"] = std::string("firmware.update.") + safe_phase;
+    payload["level"] = this->event_level_;
+    JsonObject out = payload["body"].to<JsonObject>();
+    out.set(body);
+    out["serial"] = this->device_serial_();
+    out["model"] = this->device_model_();
+    out["uptimeSec"] = millis() / 1000;
   });
 }
 
