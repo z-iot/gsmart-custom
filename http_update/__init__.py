@@ -146,6 +146,7 @@ CONFIG_SCHEMA = cv.All(
 @coroutine_with_priority(50.0)
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
+    cg.add_define("USE_GSMART_HTTP_UPDATE")
     if CONF_PASSWORD in config:
         cg.add(var.set_auth_password(config[CONF_PASSWORD]))
         cg.add_define("USE_HTTPUPDATE_PASSWORD")

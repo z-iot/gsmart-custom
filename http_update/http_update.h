@@ -186,6 +186,7 @@ class HttpUpdateResponseTrigger : public Trigger<int> {
   void process(int status_code) { this->trigger(status_code); }
 };
 
+extern HttpUpdateComponent *global_http_update;
 
 
 }  

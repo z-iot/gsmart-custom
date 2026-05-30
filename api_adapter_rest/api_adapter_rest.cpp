@@ -82,6 +82,9 @@ void ApiAdapterRest::setup() {
     web_server_base::on_post_json(server, (base_path + "/control/restart").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
       send_json(request, [this, root](JsonObject res) { this->core_->handle_restart(root, res); });
     });
+    web_server_base::on_post_json(server, (base_path + "/firmware/update").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_firmware_update(root, res); });
+    });
     web_server_base::on_post_json(server, (base_path + "/control/factory-reset").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
       send_json(request, [this, root](JsonObject res) { this->core_->handle_factory_reset(root, res); });
     });

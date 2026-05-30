@@ -25,6 +25,7 @@ namespace esphome
   {
 
     static const char *const TAG = "http_update";
+    HttpUpdateComponent *global_http_update = nullptr;
 
     std::unique_ptr<OTABackend> make_ota_backend()
     {
@@ -43,6 +44,7 @@ namespace esphome
 
     void HttpUpdateComponent::setup()
     {
+      global_http_update = this;
       this->dump_config();
     }
 

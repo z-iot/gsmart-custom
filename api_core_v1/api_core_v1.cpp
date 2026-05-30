@@ -15,6 +15,11 @@
 #include <algorithm>
 #include <cctype>
 #include <ctime>
+#include <vector>
+
+#ifdef USE_GSMART_HTTP_UPDATE
+#include "esphome/components/http_update/http_update.h"
+#endif
 
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -130,6 +135,35 @@ std::string json_string(JsonVariant value, const std::string &fallback = "") {
   if (value.isNull())
     return fallback;
   return value.as<std::string>();
+}
+
+JsonVariant nested_value(JsonObject root, const char *object_key, const char *field_key) {
+  if (!root[object_key].is<JsonObject>())
+    return JsonVariant();
+  JsonObject object = root[object_key].as<JsonObject>();
+  return object[field_key];
+}
+
+std::string json_string_any(JsonObject root, const char *top_key, const char *object_key, const char *field_key,
+                            const std::string &fallback = "") {
+  std::string value = json_string(root[top_key]);
+  if (!value.empty())
+    return value;
+  return json_string(nested_value(root, object_key, field_key), fallback);
+}
+
+std::string normalize_firmware_target_mode(JsonObject root) {
+  std::string mode = json_string_any(root, "targetMode", "target", "mode", "self");
+  mode = normalize_token(mode);
+  mode.erase(std::remove(mode.begin(), mode.end(), '-'), mode.end());
+  mode.erase(std::remove(mode.begin(), mode.end(), '_'), mode.end());
+  if (mode.empty() || mode == "self")
+    return "self";
+  if (mode == "regionmember" || mode == "member")
+    return "regionMember";
+  if (mode == "lanip" || mode == "ip" || mode == "localip")
+    return "lanIp";
+  return mode;
 }
 
 bool require_confirmation(JsonObject root, JsonObject response, const char *expected) {
@@ -1099,6 +1133,114 @@ void ApiCoreV1::handle_restart(JsonObject root, JsonObject response) {
   response["ok"] = true;
   response["rebootScheduled"] = true;
   response["delayMs"] = RESTART_DELAY_MS;
+}
+
+void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
+  const std::string target_mode = normalize_firmware_target_mode(root);
+  const bool dry_run = json_bool(root["dryRun"], json_bool(nested_value(root, "options", "dryRun"), false));
+  const bool reboot = json_bool(root["reboot"], json_bool(nested_value(root, "options", "reboot"), true));
+  const std::string url = json_string_any(root, "url", "firmware", "url", json_string(nested_value(root, "source", "url")));
+  const std::string version = json_string_any(root, "version", "firmware", "version");
+  const std::string file_id = json_string_any(root, "fileId", "firmware", "fileId");
+  const std::string release_id = json_string_any(root, "releaseId", "firmware", "releaseId");
+  const std::string target_serial = json_string_any(root, "targetSerial", "target", "serial");
+  const std::string target_ip = json_string_any(root, "targetIp", "target", "ip");
+
+  response["ok"] = true;
+  response["accepted"] = dry_run;
+  response["command"] = "firmware.update";
+  response["targetMode"] = target_mode;
+  response["dryRun"] = dry_run;
+  response["reboot"] = reboot;
+
+  JsonObject firmware = response["firmware"].to<JsonObject>();
+  firmware["url"] = url;
+  firmware["version"] = version;
+  firmware["fileId"] = file_id;
+  firmware["releaseId"] = release_id;
+
+  JsonObject target = response["target"].to<JsonObject>();
+  target["mode"] = target_mode;
+  target["serial"] = target_serial;
+  target["ip"] = target_ip;
+
+  if (target_mode == "self") {
+    if (url.empty()) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "missing_firmware_url";
+      response["message"] = "Self firmware update requires firmware.url or url.";
+      return;
+    }
+
+    response["accepted"] = true;
+    response["source"] = "cloud";
+    if (dry_run) {
+      response["scheduled"] = false;
+      return;
+    }
+
+#ifdef USE_GSMART_HTTP_UPDATE
+    if (http_update::global_http_update == nullptr) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "http_update_not_ready";
+      response["message"] = "HTTP update component is not ready.";
+      return;
+    }
+
+    const std::string update_url = url;
+    this->set_timeout("api_firmware_update_self", 250, [update_url]() {
+      std::vector<http_update::HttpUpdateResponseTrigger *> triggers;
+      http_update::global_http_update->set_url(update_url);
+      http_update::global_http_update->set_method("GET");
+      http_update::global_http_update->flash(triggers);
+      http_update::global_http_update->close();
+    });
+    response["scheduled"] = true;
+    response["delayMs"] = 250;
+#else
+    response["ok"] = false;
+    response["accepted"] = false;
+    response["error"] = "http_update_not_available";
+    response["message"] = "This firmware was built without the HTTP update component.";
+#endif
+    return;
+  }
+
+  if (target_mode == "regionMember" || target_mode == "lanIp") {
+    if (target_mode == "lanIp" && target_ip.empty()) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "missing_target_ip";
+      response["message"] = "LAN IP firmware update requires target.ip or targetIp.";
+      return;
+    }
+    if (target_mode == "regionMember" && target_serial.empty() && target_ip.empty()) {
+      response["ok"] = false;
+      response["accepted"] = false;
+      response["error"] = "missing_region_member_target";
+      response["message"] = "Region member firmware update requires target.serial or target.ip.";
+      return;
+    }
+
+    if (dry_run) {
+      response["accepted"] = true;
+      response["scheduled"] = false;
+      return;
+    }
+
+    response["ok"] = false;
+    response["accepted"] = false;
+    response["error"] = "delegated_ota_not_implemented";
+    response["message"] = "Delegated region/LAN OTA proxy is recognized but not implemented in this firmware build yet.";
+    return;
+  }
+
+  response["ok"] = false;
+  response["accepted"] = false;
+  response["error"] = "invalid_target_mode";
+  response["message"] = "Supported firmware update target modes are self, regionMember and lanIp.";
 }
 
 void ApiCoreV1::handle_factory_reset(JsonObject root, JsonObject response) {

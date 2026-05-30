@@ -435,6 +435,11 @@ std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, Json
     this->core_->handle_identify(body, response);
   } else if (name == "g-node.control.restart.set") {
     this->core_->handle_restart(body, response);
+  } else if (name == "g-node.firmware.update.set") {
+    body["transport"] = "glink";
+    this->core_->handle_firmware_update(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "firmware_update_failed");
   } else if (name == "g-node.control.service_ap.set") {
     this->core_->handle_service_ap(body, response);
   } else if (name == "g-node.scheduler.set") {
