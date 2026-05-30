@@ -150,7 +150,7 @@ namespace esphome
         ESP_LOGE(TAG, "CRITICAL: schedule is NULL!");
       }
 #endif
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
       usage->setup();
 #endif
 

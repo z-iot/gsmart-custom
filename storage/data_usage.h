@@ -8,6 +8,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/defines.h"
 
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+
 #define DEVICE_MAX_LAMP 3
 #define DEVICE_MAX_FAN 2
 
@@ -77,13 +79,6 @@ namespace esphome
       uint16_t stopCount = 0;
       uint32_t lastStart = 0;
       uint32_t lastStop = 0;
-    };
-
-    struct UsageError
-    {
-      uint32_t totalCount = 0;
-      std::string lastDesc = "";
-      uint16_t lastCode = 0;
     };
 
     class DataUsage
@@ -171,7 +166,7 @@ namespace esphome
 
       void fillAdvertise(JsonObject &root)
       {
-        auto nowSec = millis() / 1000;
+        root["enabled"] = true;
 #ifdef GSMART_EMITTER
         root["beamOnSec"] = beam.pref.onSec;
         root["beamStCnt"] = beam.pref.startCount;
@@ -183,8 +178,6 @@ namespace esphome
         // root["motOffSec"] = motion.offSec;
         root["motStCnt"] = motion.startCount;
 #endif
-        root["errMsg"] = error.lastDesc;
-        root["errCnt"] = error.totalCount;
       };
 
       std::string formatOnSec(uint32_t sec)
@@ -210,8 +203,6 @@ namespace esphome
       UsageFan fan[DEVICE_MAX_FAN];
       UsageMotion motion;
 #endif
-      UsageError error;
-
       uint32_t lastCheck = 0;       // naposledy kontrolovane v ms od startu
       uint32_t lastChange = 0;      // naposledy zmene udaje v ms od startu
       uint32_t lastStorage = 0;     // naposledy ulozene udaje v ms od startu
@@ -225,3 +216,5 @@ namespace esphome
 
   }
 }
+
+#endif

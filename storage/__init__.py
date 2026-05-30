@@ -78,15 +78,19 @@ async def to_code(config):
     if config[CONF_MODEL] == "sibra":
         cg.add_define("GSMART_MODEL_SIBRA")
         cg.add_define("GSMART_EMITTER")
+        cg.add_define("GSMART_FEATURE_USAGE")
     elif config[CONF_MODEL] == "opera":
         cg.add_define("GSMART_MODEL_OPERA")
         cg.add_define("GSMART_EMITTER")
+        cg.add_define("GSMART_FEATURE_USAGE")
     elif config[CONF_MODEL] == "aqua":
         cg.add_define("GSMART_MODEL_AQUA")
         cg.add_define("GSMART_EMITTER")
+        cg.add_define("GSMART_FEATURE_USAGE")
     elif config[CONF_MODEL] == "mobi":
         cg.add_define("GSMART_MODEL_MOBI")
         cg.add_define("GSMART_EMITTER")
+        cg.add_define("GSMART_FEATURE_USAGE")
     elif config[CONF_MODEL] == "panel":
         cg.add_define("GSMART_MODEL_PANEL")
         cg.add_define("GSMART_ACTUATOR")

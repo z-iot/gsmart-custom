@@ -374,17 +374,11 @@ void add_motion_status(JsonObject root) {
 
 void add_error_status(JsonObject root) {
   JsonObject errors = root["errors"].to<JsonObject>();
-  errors["count"] = 0;
-  errors["lastCode"] = 0;
-  errors["lastMessage"] = "";
-  errors["hasError"] = false;
-
-#ifdef GSMART_FEATURE_USAGE
-  errors["count"] = storage::store->usage->error.totalCount;
-  errors["lastCode"] = storage::store->usage->error.lastCode;
-  errors["lastMessage"] = storage::store->usage->error.lastDesc;
-  errors["hasError"] = storage::store->usage->error.totalCount > 0;
-#endif
+  const auto &error_state = storage::store->global->errors;
+  errors["count"] = error_state.totalCount;
+  errors["lastCode"] = error_state.lastCode;
+  errors["lastMessage"] = error_state.lastDesc;
+  errors["hasError"] = error_state.totalCount > 0;
 
   JsonArray warnings = root["warnings"].to<JsonArray>();
   if (storage::store->global->isGuardDurationOverflow()) {
@@ -392,13 +386,11 @@ void add_error_status(JsonObject root) {
     warning["code"] = "guard_duration_overflow";
     warning["message"] = "Radiation guard duration has been exceeded.";
   }
-#ifdef GSMART_FEATURE_USAGE
-  if (storage::store->usage->error.totalCount > 0) {
+  if (error_state.totalCount > 0) {
     JsonObject warning = warnings.add<JsonObject>();
     warning["code"] = "device_error";
-    warning["message"] = storage::store->usage->error.lastDesc;
+    warning["message"] = error_state.lastDesc;
   }
-#endif
 }
 
 void add_diagnostics_telemetry(JsonObject root) {
@@ -420,11 +412,7 @@ void add_diagnostics_telemetry(JsonObject root) {
   telemetry["fans"] = "not_instrumented";
   telemetry["relays"] = "not_instrumented";
   telemetry["triacs"] = "not_instrumented";
-#ifdef GSMART_FEATURE_USAGE
-  telemetry["errors"] = "stored";
-#else
-  telemetry["errors"] = "disabled";
-#endif
+  telemetry["errors"] = "runtime";
 }
 
 }  // namespace
@@ -504,7 +492,7 @@ void ApiCoreV1::build_info(JsonObject root) {
 #else
   capabilities["region"] = false;
 #endif
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   capabilities["consumption"] = true;
 #else
   capabilities["consumption"] = false;
@@ -615,11 +603,10 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
 }
 
 void ApiCoreV1::build_consumption(JsonObject root) {
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   storage::store->usage->fillAdvertise(root);
   root["uptimeSec"] = millis() / 1000;
 
-#ifdef GSMART_EMITTER
   JsonObject beam = root["beam"].to<JsonObject>();
   beam["lampCount"] = storage::store->usage->beam.pref.lampCount;
   beam["fanCount"] = storage::store->usage->beam.pref.fanCount;
@@ -643,7 +630,6 @@ void ApiCoreV1::build_consumption(JsonObject root) {
     channel["lastStopSec"] = storage::store->usage->lamp[i].lastStop;
     channel["running"] = storage::store->usage->lamp[i].lastStart > storage::store->usage->lamp[i].lastStop;
   }
-#endif
 #else
   root["enabled"] = false;
 #endif
@@ -1562,7 +1548,7 @@ void ApiCoreV1::handle_clear_usage(JsonObject root, JsonObject response) {
   if (!require_confirmation(root, response, "CLEAR_USAGE"))
     return;
 
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   if (storage::store == nullptr || storage::store->usage == nullptr) {
     response["ok"] = false;
     response["error"] = "usage_not_ready";

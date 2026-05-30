@@ -1,5 +1,7 @@
 #include "data_usage.h"
 
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+
 namespace esphome
 {
   namespace storage
@@ -116,7 +118,6 @@ namespace esphome
 
       motion = UsageMotion{};
 #endif
-      error = UsageError{};
       lastCheck = 0;
       lastChange = 0;
       lastStorage = 0;
@@ -129,3 +130,5 @@ namespace esphome
 
   }
 }
+
+#endif

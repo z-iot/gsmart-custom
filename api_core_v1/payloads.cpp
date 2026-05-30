@@ -65,11 +65,18 @@ void system_info_json(JsonObject root) {
       esphome::storage::store->global->radiation.activeMode);
 
   JsonObject usage = root["usage"].to<JsonObject>();
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   esphome::storage::store->usage->fillAdvertise(usage);
 #else
   usage["enabled"] = false;
 #endif
+
+  JsonObject errors = root["errors"].to<JsonObject>();
+  const auto &error_state = esphome::storage::store->global->errors;
+  errors["count"] = error_state.totalCount;
+  errors["lastCode"] = error_state.lastCode;
+  errors["lastMessage"] = error_state.lastDesc;
+  errors["hasError"] = error_state.totalCount > 0;
 }
 
 void neighborhood_json(JsonObject root) {

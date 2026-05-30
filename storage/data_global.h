@@ -95,6 +95,20 @@ namespace esphome
       uint32_t lastDisconnect = 0;
     };
 
+    struct DeviceErrorState
+    {
+      uint32_t totalCount = 0;
+      std::string lastDesc = "";
+      uint16_t lastCode = 0;
+
+      void clear()
+      {
+        totalCount = 0;
+        lastDesc = "";
+        lastCode = 0;
+      }
+    };
+
     struct SituationInfo
     {
       bool SchedulerActive = false;
@@ -189,6 +203,7 @@ namespace esphome
 
       FactoryMode factoryMode = FactoryMode::CLOUD;
       ConSettings con;
+      DeviceErrorState errors;
       RadiationSettings radiation;
       ModeSettings mode;
       SituationInfo situation;

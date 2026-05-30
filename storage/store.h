@@ -16,7 +16,9 @@
 #endif
 
 #include "data_global.h"
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
 #include "data_usage.h"
+#endif
 #include "data_region.h"
 #include "global.h"
 #ifdef GSMART_FEATURE_FILESYSTEM
@@ -273,7 +275,7 @@ namespace esphome
         return "";
       }
 
-#ifdef GSMART_EMITTER
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
       void updateLamp(time_t now, uint8_t lampNum, bool on)
       {
         uint8_t lampCountOld = this->usage->lampOnCount();
@@ -576,7 +578,7 @@ namespace esphome
 #ifdef GSMART_FEATURE_REGION
       DataRegion *region = new DataRegion();
 #endif
-#ifdef GSMART_FEATURE_USAGE
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
       DataUsage *usage = new DataUsage();
 #endif
       DataGlobal *global = new DataGlobal();
