@@ -446,8 +446,11 @@ bool GsmartWifiManager::save_client_settings() {
   this->persistence_status_.client_verify_ok = verify_ok;
 
   if (!save_ok || !sync_ok || !verify_ok) {
-    ESP_LOGW(TAG, "Client Wi-Fi settings persistence failed: save=%s sync=%s verify=%s",
-             save_ok ? "true" : "false", sync_ok ? "true" : "false", verify_ok ? "true" : "false");
+    // save=false almost always means the platform could not hand out a preference slot (on
+    // ESP8266 the flash preference pool is shared and fixed size), so the credentials would be
+    // lost on the next boot. Log it as an error - this must not look like a routine warning.
+    ESP_LOGE(TAG, "Client Wi-Fi settings persistence FAILED: save=%s sync=%s verify=%s", save_ok ? "true" : "false",
+             sync_ok ? "true" : "false", verify_ok ? "true" : "false");
   } else {
     ESP_LOGI(TAG, "Client Wi-Fi settings persisted and verified: primary_ssid='%s' password_set=%s sta_mode=%u",
              this->client_settings_.customer_primary_ssid,
