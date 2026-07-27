@@ -198,7 +198,7 @@ async def to_code(config):
         cg.add_define("USE_HTTP_UPDATE_ESP8266_HTTPS")
 
     if CORE.is_esp32:
-        cg.add_library("Networking", None)
+        cg.add_library("Network", None)
         cg.add_library("WiFi", None)
         cg.add_library("NetworkClientSecure", None)
         cg.add_library("HTTPClient", None)

@@ -50,8 +50,9 @@ namespace esphome
 
     void HttpUpdateComponent::dump_config()
     {
+      char use_address[network::USE_ADDRESS_BUFFER_SIZE];
       ESP_LOGCONFIG(TAG, "Http Updates:");
-      ESP_LOGCONFIG(TAG, "  Address: %s", network::get_use_address());
+      ESP_LOGCONFIG(TAG, "  Address: %s", network::get_use_address_to(use_address));
       ESP_LOGCONFIG(TAG, "  Timeout: %ums", this->timeout_);
       ESP_LOGCONFIG(TAG, "  User-Agent: %s", this->useragent_);
       ESP_LOGCONFIG(TAG, "  Follow Redirects: %d", this->follow_redirects_);
