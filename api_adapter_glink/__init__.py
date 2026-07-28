@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_URL
+from esphome.core import CORE
 from ..api_core_v1 import ApiCoreV1
 
 CODEOWNERS = ["@max-iot"]
@@ -21,6 +22,14 @@ def validate_ws_url(value):
     value = cv.string(value)
     if not (value.startswith("ws://") or value.startswith("wss://")):
         raise cv.Invalid("G-Link device url must start with ws:// or wss://")
+    if value.startswith("wss://") and CORE.is_esp8266:
+        raise cv.Invalid(
+            "wss:// cannot work on the ESP8266. The WebSockets library leaves BearSSL at its "
+            "default 16 kB receive buffer, which has to come out of one contiguous block, and a "
+            "REX has roughly 15 kB of largest free block left. The TLS handshake never completes, "
+            "so the device retries forever and never reaches authentication - it just looks "
+            "offline. Point this build at a plain ws:// G-Link endpoint instead."
+        )
     return value
 
 

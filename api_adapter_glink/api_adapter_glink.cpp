@@ -32,6 +32,10 @@ namespace api_adapter_glink {
 
 static const char *const TAG = "api_adapter_glink";
 
+// WebSocketsClient's own throttle between dial attempts; must stay well below the 8 s connect
+// budget in loop(), because it also gates the first dial after a boot. This is the library default.
+static const unsigned long WS_DIAL_THROTTLE_MS = 500;
+
 namespace {
 
 const char *radiation_mode_to_api(storage::RadiationMode mode) {
@@ -201,7 +205,13 @@ void ApiAdapterGLink::connect_() {
   this->websocket_.onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
     this->on_websocket_event_(type, payload, length);
   });
-  this->websocket_.setReconnectInterval(this->reconnect_interval_ms_);
+  // This is the library's own "do not flood the server" throttle between dial attempts inside
+  // WebSocketsClient::loop(), not our retry backoff - and it gates the very first dial as well,
+  // because begin() zeroes _lastConnectionFail and loop() then refuses to dial until millis()
+  // exceeds the interval. Feeding it reconnect_interval_ms_ (60 s) meant the first connect after a
+  // boot sat idle while our own 8 s connect budget ran out, so it always failed and only the
+  // retry 60 s later got through. Our backoff is next_connect_ms_; keep this at the library default.
+  this->websocket_.setReconnectInterval(WS_DIAL_THROTTLE_MS);
 
   ESP_LOGI(TAG, "Connecting to G-Link %s%s:%u%s", this->parsed_.secure ? "wss://" : "ws://", this->parsed_.host.c_str(),
            this->parsed_.port, this->parsed_.path.c_str());
