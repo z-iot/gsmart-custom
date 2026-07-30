@@ -25,6 +25,9 @@ static const uint8_t OTA_VERSION_2_0 = 2;
 // not advertise it, so the feature byte is no longer just "no compression".
 static const uint8_t CLIENT_FEATURE_SUPPORTS_SHA256_AUTH = 0x02;
 
+// Offered only for a payload that really is gzip. Only the ESP8266 backend inflates.
+static const uint8_t CLIENT_FEATURE_SUPPORTS_COMPRESSION = 0x01;
+
 // Not in the vendored ota_backend.h, which predates protocol 2.
 static const uint8_t OTA_RESPONSE_REQUEST_SHA256_AUTH = 2;
 
@@ -108,10 +111,15 @@ http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
   }
   this->protocol_version_ = buf[1];
 
-  // No compression either way - the wire MD5 belongs to the uncompressed image.
+  // Compression is offered only when the payload really is gzip - the target
+  // inflates whatever arrives, so offering it for a raw image would flash garbage.
   // Extended protocol is deliberately not requested: it would add an OTA-type byte
   // to the data phase and buys nothing here.
-  buf[0] = this->protocol_version_ >= OTA_VERSION_2_0 ? CLIENT_FEATURE_SUPPORTS_SHA256_AUTH : 0x00;
+  buf[0] = 0x00;
+  if (this->protocol_version_ >= OTA_VERSION_2_0)
+    buf[0] |= CLIENT_FEATURE_SUPPORTS_SHA256_AUTH;
+  if (this->request_.compressed)
+    buf[0] |= CLIENT_FEATURE_SUPPORTS_COMPRESSION;
   if (!this->writeall_(buf, 1)) {
     this->set_error_("features_write_failed");
     return http_update::OTA_RESPONSE_ERROR_UNKNOWN;
@@ -123,6 +131,12 @@ http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
   if (buf[0] != http_update::OTA_RESPONSE_HEADER_OK && buf[0] != http_update::OTA_RESPONSE_SUPPORTS_COMPRESSION) {
     this->set_error_("header_rejected");
     return static_cast<http_update::OTAResponseTypes>(buf[0]);
+  }
+  // Refuse rather than send a gzip the target will not inflate: it would land in
+  // flash verbatim and brick the device.
+  if (this->request_.compressed && buf[0] != http_update::OTA_RESPONSE_SUPPORTS_COMPRESSION) {
+    this->set_error_("target_refused_compression");
+    return http_update::OTA_RESPONSE_ERROR_UNKNOWN;
   }
 
   if (!this->readall_(buf, 1)) {

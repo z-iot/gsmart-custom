@@ -1217,6 +1217,9 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
   const uint32_t file_size = json_uint32(root["fileSize"], json_uint32(nested_value(root, "firmware", "fileSize"), 0));
   const std::string target_serial = json_string_any(root, "targetSerial", "target", "serial");
   const std::string target_ip = json_string_any(root, "targetIp", "target", "ip");
+  // Set by the board when it hands out a gzip instead of the raw image, which is
+  // the only way an esp8266 target fits. md5 and fileSize then describe the archive.
+  const bool compressed = json_bool(root["compressed"], json_bool(nested_value(root, "firmware", "compressed"), false));
 
   response["ok"] = true;
   response["accepted"] = dry_run;
@@ -1386,15 +1389,18 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
     const uint32_t scheduled_file_size = file_size;
     this->emit_firmware_event_("started", "master", scheduled_target_serial, scheduled_target_ip, scheduled_version,
                                scheduled_file_id, scheduled_release_id, scheduled_file_size, 0);
+    const bool scheduled_compressed = compressed;
     this->set_timeout("api_firmware_update_delegated", 250,
                       [this, update_url, wire_md5, password, scheduled_target_ip, target_port, scheduled_target_serial,
-                       scheduled_version, scheduled_file_id, scheduled_release_id, scheduled_file_size]() {
+                       scheduled_version, scheduled_file_id, scheduled_release_id, scheduled_file_size,
+                       scheduled_compressed]() {
                         ota_push::OtaPushRequest request;
                         request.url = update_url;
                         request.target_ip = scheduled_target_ip;
                         request.target_port = target_port;
                         request.md5 = wire_md5;
                         request.ota_password = password;
+                        request.compressed = scheduled_compressed;
                         uint32_t last_event_ms = 0;
                         uint32_t last_percent = 0;
                         const bool ok = ota_push::global_ota_push->push_url(request, [this, scheduled_target_serial,

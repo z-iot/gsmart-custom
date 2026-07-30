@@ -19,6 +19,10 @@ struct OtaPushRequest {
   uint16_t target_port{3232};
   std::string md5;
   std::string ota_password;
+  /// The payload behind `url` is gzip, so ask the target to inflate it. Only the
+  /// ESP8266 backend can, and it is the only way a rex image fits its 1 MB part.
+  /// Never set this for a raw image - the target would inflate garbage into flash.
+  bool compressed{false};
 };
 
 class OtaPushBackend : public http_update::OTABackend {
