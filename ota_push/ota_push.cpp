@@ -57,7 +57,11 @@ bool OtaPushComponent::push_url(const OtaPushRequest &request, std::function<voi
   backend.configure(effective);
   http_update::global_http_update->set_url(effective.url);
   http_update::global_http_update->set_method("GET");
+
+  this->busy_ = true;
   const bool ok = http_update::global_http_update->flash_to_backend(&backend, progress);
+  this->busy_ = false;
+
   http_update::global_http_update->close();
   this->last_error_ = ok ? "" : backend.last_error();
   return ok;

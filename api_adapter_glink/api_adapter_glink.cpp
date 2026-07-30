@@ -9,7 +9,12 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_GSMART_OTA_PUSH
+#include "esphome/components/ota_push/ota_push.h"
+#endif
+
 #include <ArduinoJson.h>
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +36,15 @@ namespace esphome {
 namespace api_adapter_glink {
 
 static const char *const TAG = "api_adapter_glink";
+
+/// Always false on builds without the relay - esp8266 has no ota_push at all.
+static bool ota_push_busy_() {
+#ifdef USE_GSMART_OTA_PUSH
+  return ota_push::global_ota_push != nullptr && ota_push::global_ota_push->busy();
+#else
+  return false;
+#endif
+}
 
 // WebSocketsClient's own throttle between dial attempts; must stay well below the 8 s connect
 // budget in loop(), because it also gates the first dial after a boot. This is the library default.
@@ -172,6 +186,17 @@ void ApiAdapterGLink::loop() {
 
   if (!this->connected_ && this->connect_started_ms_ != 0 && now - this->connect_started_ms_ > 8000) {
     this->stop_("connect timeout");
+    return;
+  }
+
+  // While this node is relaying a firmware image to a region member it already
+  // holds a TLS download and the OTA push socket open. Serialising a heartbeat and
+  // writing it over the same TLS link competes for memory at the worst moment - the
+  // master rebooted about 190 kB into a 1.3 MB push - so stay quiet until it ends.
+  // The timestamps are moved along so the pause does not release a burst afterwards.
+  if (ota_push_busy_()) {
+    this->last_heartbeat_ms_ = now;
+    this->last_full_heartbeat_ms_ = now;
     return;
   }
 

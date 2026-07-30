@@ -60,9 +60,15 @@ class OtaPushComponent : public Component {
   bool push_url(const OtaPushRequest &request, std::function<void(size_t, size_t)> progress);
   const std::string &last_error() const { return this->last_error_; }
 
+  /// True while a delegated OTA is streaming. Other components use it to stay off
+  /// the air: the relay already holds a TLS download and the push socket open, and
+  /// anything else talking at the same time competes for the same memory.
+  bool busy() const { return this->busy_; }
+
  protected:
   std::string ota_password_{"promoss1"};
   std::string last_error_{};
+  bool busy_{false};
 };
 
 extern OtaPushComponent *global_ota_push;
