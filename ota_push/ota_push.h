@@ -39,13 +39,17 @@ class OtaPushBackend : public http_update::OTABackend {
   bool expect_(uint8_t expected, const char *stage, uint32_t timeout_ms = 5000);
   bool authenticate_(uint8_t *buf);
   bool authenticate_sha256_();
+  bool drain_chunk_acks_(bool final);
   void set_error_(const char *error);
 
   WiFiClient client_{};
   OtaPushRequest request_{};
   std::string bin_md5_{};
-  /// Whichever protocol the target acked with, 1 or 2. Decides the auth digest.
+  /// Whichever protocol the target acked with, 1 or 2. Decides the auth digest
+  /// and whether the data stream is acknowledged block by block.
   uint8_t protocol_version_{1};
+  size_t written_{0};
+  size_t acked_{0};
   std::string last_error_{};
   bool started_{false};
 };

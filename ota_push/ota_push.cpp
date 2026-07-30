@@ -31,6 +31,15 @@ static const uint8_t OTA_RESPONSE_REQUEST_SHA256_AUTH = 2;
 static const size_t MD5_HEX_SIZE = 32;
 static const size_t SHA256_HEX_SIZE = 64;
 
+// Protocol 2 acknowledges the data stream: the target replies CHUNK_OK once per
+// full block, and once more for the tail when the last byte arrives. A client that
+// never reads them leaves the target blocking on a write it cannot complete, which
+// is what stalled the relay part way through and then took the master down with it.
+// ESPHomeOTAComponent::handle_data_ is the reference; GsmartAir's uploader does the
+// same for version >= 2.
+static const size_t OTA_BLOCK_SIZE = 8192;
+static const uint8_t OTA_RESPONSE_CHUNK_OK = 0x47;
+
 OtaPushComponent *global_ota_push = nullptr;
 
 void OtaPushComponent::setup() {
@@ -72,6 +81,9 @@ void OtaPushBackend::configure(const OtaPushRequest &request) {
   this->bin_md5_ = request.md5;
   this->last_error_.clear();
   this->started_ = false;
+  this->written_ = 0;
+  this->acked_ = 0;
+  this->protocol_version_ = OTA_VERSION_1_0;
 }
 
 http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
@@ -140,7 +152,11 @@ http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
     this->set_error_("size_write_failed");
     return http_update::OTA_RESPONSE_ERROR_UPDATE_PREPARE;
   }
-  if (!this->expect_(http_update::OTA_RESPONSE_UPDATE_PREPARE_OK, "prepare_ok"))
+  // The target answers this only after its backend has begun the update, which on
+  // esp32 erases the OTA partition first. That outlasts the 5 s default for a large
+  // image: a 1.32 MB panel made it, a 1.58 MB sibra did not and the push died with
+  // "prepare_ok" having sent nothing.
+  if (!this->expect_(http_update::OTA_RESPONSE_UPDATE_PREPARE_OK, "prepare_ok", 60000))
     return http_update::OTA_RESPONSE_ERROR_UPDATE_PREPARE;
 
   if (this->bin_md5_.length() != 32) {
@@ -170,10 +186,37 @@ http_update::OTAResponseTypes OtaPushBackend::write(uint8_t *data, size_t len) {
     this->set_error_("body_write_failed");
     return http_update::OTA_RESPONSE_ERROR_WRITING_FLASH;
   }
+  this->written_ += len;
+  if (!this->drain_chunk_acks_(false)) {
+    return http_update::OTA_RESPONSE_ERROR_WRITING_FLASH;
+  }
   return http_update::OTA_RESPONSE_OK;
 }
 
+/// Consumes the CHUNK_OK bytes protocol 2 sends back, one per full block. With
+/// `final` set it also takes the acknowledgement covering the trailing partial
+/// block, which the target emits once the last byte has arrived.
+bool OtaPushBackend::drain_chunk_acks_(bool final) {
+  if (this->protocol_version_ < OTA_VERSION_2_0)
+    return true;
+
+  while (this->acked_ + OTA_BLOCK_SIZE <= this->written_) {
+    if (!this->expect_(OTA_RESPONSE_CHUNK_OK, "chunk_ok", 20000))
+      return false;
+    this->acked_ += OTA_BLOCK_SIZE;
+  }
+
+  if (final && this->acked_ < this->written_) {
+    if (!this->expect_(OTA_RESPONSE_CHUNK_OK, "chunk_ok_tail", 20000))
+      return false;
+    this->acked_ = this->written_;
+  }
+  return true;
+}
+
 http_update::OTAResponseTypes OtaPushBackend::end() {
+  if (!this->drain_chunk_acks_(true))
+    return http_update::OTA_RESPONSE_ERROR_WRITING_FLASH;
   if (!this->expect_(http_update::OTA_RESPONSE_RECEIVE_OK, "receive_ok", 15000))
     return http_update::OTA_RESPONSE_ERROR_WRITING_FLASH;
   if (!this->expect_(http_update::OTA_RESPONSE_UPDATE_END_OK, "update_end_ok", 20000))
