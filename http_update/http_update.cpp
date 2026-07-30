@@ -254,7 +254,7 @@ namespace esphome
       this->client_.setRedirectLimit(this->redirect_limit_);
 #endif
 #if defined(USE_ESP32)
-      begin_status = this->client_.begin(url);
+      begin_status = this->client_.begin(*this->get_esp32_client_(), url);
 #elif defined(USE_ESP8266)
       begin_status = this->client_.begin(*this->get_wifi_client_(), url);
 #endif
@@ -306,6 +306,12 @@ namespace esphome
       // if(currentVersion && currentVersion[0] != 0x00) {
       //     this->client_.addHeader("x-ESP32-version", currentVersion);
       // }
+
+      // HTTPClient keeps only the response headers it was told to collect, so
+      // without this header("x-MD5") below is always empty and the digest check in
+      // stream_to_backend_ is silently skipped. That check is what makes the
+      // unauthenticated TLS transport safe, so it must not be optional.
+      collect_md5_header_();
 
       int http_code = this->client_.GET();
       int http_len = this->client_.getSize();
@@ -444,7 +450,7 @@ namespace esphome
       this->client_.setRedirectLimit(this->redirect_limit_);
 #endif
 #if defined(USE_ESP32)
-      begin_status = this->client_.begin(url);
+      begin_status = this->client_.begin(*this->get_esp32_client_(), url);
 #elif defined(USE_ESP8266)
       begin_status = this->client_.begin(*this->get_wifi_client_(), url);
 #endif
@@ -467,6 +473,7 @@ namespace esphome
         this->client_.addHeader(header.name, header.value, false, true);
       }
       this->client_.addHeader("Cache-Control", "no-cache");
+      collect_md5_header_();
 
       int http_code = this->client_.GET();
       int http_len = this->client_.getSize();
@@ -505,6 +512,51 @@ namespace esphome
       this->status_clear_warning();
       return true;
     }
+
+    void HttpUpdateComponent::collect_md5_header_()
+    {
+      // collectHeaders takes const char** and keeps the pointer, so the array has to
+      // outlive the request and must not be const-qualified one level deeper.
+      static const char *md5_header[] = {"x-MD5"};
+      this->client_.collectHeaders(md5_header, 1);
+    }
+
+#ifdef USE_ESP32
+    // ESP32 used the one-argument HTTPClient::begin(url), which for an https URL
+    // builds an internal secure client with no trust store and no way to relax it,
+    // so every https firmware download failed - and it failed *after*
+    // handle_firmware_update had already answered "accepted", which is why the
+    // cloud OTA looked like it worked and the device never rebooted.
+    //
+    // The ESP8266 branch below already solved this by owning the client and calling
+    // setInsecure(); do the same here. The transport is unauthenticated, so the
+    // payload is what has to be trusted: the server sends the expected digest in
+    // x-MD5 and stream_to_backend_ hands it to the OTA backend, which refuses an
+    // image that does not match. That check is why pinning a CA is not needed, and
+    // it survives certificate rotation - which would otherwise take the whole fleet's
+    // update path down with no way to ship the fix.
+    WiFiClient *HttpUpdateComponent::get_esp32_client_()
+    {
+      // Derived from the URL rather than read from secure_, which only the flash
+      // path assigns - the sink path would otherwise see a stale value and hand an
+      // https download a plain client.
+      if (this->url_.compare(0, 6, "https:") == 0)
+      {
+        if (this->esp32_client_secure_ == nullptr)
+        {
+          this->esp32_client_secure_ = std::make_shared<WiFiClientSecure>();
+          this->esp32_client_secure_->setInsecure();
+        }
+        return this->esp32_client_secure_.get();
+      }
+
+      if (this->esp32_client_ == nullptr)
+      {
+        this->esp32_client_ = std::make_shared<WiFiClient>();
+      }
+      return this->esp32_client_.get();
+    }
+#endif
 
 #ifdef USE_ESP8266
     std::shared_ptr<WiFiClient> HttpUpdateComponent::get_wifi_client_()

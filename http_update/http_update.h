@@ -17,6 +17,11 @@
 
 #ifdef USE_ESP32
 #include <HTTPClient.h>
+// WiFi.h first: on Arduino-ESP32 3.x the socket classes are NetworkClient /
+// NetworkClientSecure and the WiFiClient* names are compatibility typedefs that
+// only WiFi.h declares. Including WiFiClientSecure.h alone does not compile.
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
 #endif
 #ifdef USE_ESP8266
 #include <ESP8266HTTPClient.h>
@@ -127,6 +132,12 @@ class HttpUpdateComponent : public Component {
 #endif
   std::shared_ptr<WiFiClient> get_wifi_client_();
 #endif
+#ifdef USE_ESP32
+  std::shared_ptr<WiFiClient> esp32_client_;
+  std::shared_ptr<WiFiClientSecure> esp32_client_secure_;
+  WiFiClient *get_esp32_client_();
+#endif
+  void collect_md5_header_();
 };
 
 
