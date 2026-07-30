@@ -4,7 +4,9 @@ from esphome.const import CONF_ID
 
 CODEOWNERS = ["@grid"]
 DEPENDENCIES = ["http_update", "udp_server", "network"]
-AUTO_LOAD = ["md5"]
+# sha256: OTA protocol 2 authenticates with SHA256 and rejects a client that does
+# not offer it. md5 stays for protocol 1 targets and for the image digest.
+AUTO_LOAD = ["md5", "sha256"]
 
 CONF_OTA_PASSWORD = "ota_password"
 

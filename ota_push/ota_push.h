@@ -4,6 +4,7 @@
 
 #include "esphome/components/http_update/http_update.h"
 #include "esphome/components/md5/md5.h"
+#include "esphome/components/sha256/sha256.h"
 #include "esphome/core/component.h"
 #include <WiFiClient.h>
 #include <functional>
@@ -37,11 +38,14 @@ class OtaPushBackend : public http_update::OTABackend {
   bool writeall_(const uint8_t *buf, size_t len, uint32_t timeout_ms = 5000);
   bool expect_(uint8_t expected, const char *stage, uint32_t timeout_ms = 5000);
   bool authenticate_(uint8_t *buf);
+  bool authenticate_sha256_();
   void set_error_(const char *error);
 
   WiFiClient client_{};
   OtaPushRequest request_{};
   std::string bin_md5_{};
+  /// Whichever protocol the target acked with, 1 or 2. Decides the auth digest.
+  uint8_t protocol_version_{1};
   std::string last_error_{};
   bool started_{false};
 };

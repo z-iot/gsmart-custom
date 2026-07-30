@@ -16,6 +16,21 @@ static const char *const TAG = "ota_push";
 static const uint8_t OTA_MAGIC[5] = {0x6C, 0x26, 0xF7, 0x5C, 0x45};
 static const uint8_t OTA_VERSION_1_0 = 1;
 
+// ESPHome's OTA server has spoken protocol 2 for a while - every model here builds
+// with USE_OTA_VERSION 2 - so demanding version 1 made the handshake fail with
+// magic_ack_failed against every device, and delegated OTA never worked at all.
+static const uint8_t OTA_VERSION_2_0 = 2;
+
+// Protocol 2 replaces the MD5 challenge with SHA256 and refuses a client that does
+// not advertise it, so the feature byte is no longer just "no compression".
+static const uint8_t CLIENT_FEATURE_SUPPORTS_SHA256_AUTH = 0x02;
+
+// Not in the vendored ota_backend.h, which predates protocol 2.
+static const uint8_t OTA_RESPONSE_REQUEST_SHA256_AUTH = 2;
+
+static const size_t MD5_HEX_SIZE = 32;
+static const size_t SHA256_HEX_SIZE = 64;
+
 OtaPushComponent *global_ota_push = nullptr;
 
 void OtaPushComponent::setup() {
@@ -70,12 +85,17 @@ http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
     this->set_error_("magic_write_failed");
     return http_update::OTA_RESPONSE_ERROR_MAGIC;
   }
-  if (!this->readall_(buf, 2) || buf[0] != http_update::OTA_RESPONSE_OK || buf[1] != OTA_VERSION_1_0) {
+  if (!this->readall_(buf, 2) || buf[0] != http_update::OTA_RESPONSE_OK ||
+      (buf[1] != OTA_VERSION_1_0 && buf[1] != OTA_VERSION_2_0)) {
     this->set_error_("magic_ack_failed");
     return http_update::OTA_RESPONSE_ERROR_MAGIC;
   }
+  this->protocol_version_ = buf[1];
 
-  buf[0] = 0x00;  // No compression. The wire MD5 belongs to the uncompressed image.
+  // No compression either way - the wire MD5 belongs to the uncompressed image.
+  // Extended protocol is deliberately not requested: it would add an OTA-type byte
+  // to the data phase and buys nothing here.
+  buf[0] = this->protocol_version_ >= OTA_VERSION_2_0 ? CLIENT_FEATURE_SUPPORTS_SHA256_AUTH : 0x00;
   if (!this->writeall_(buf, 1)) {
     this->set_error_("features_write_failed");
     return http_update::OTA_RESPONSE_ERROR_UNKNOWN;
@@ -93,7 +113,12 @@ http_update::OTAResponseTypes OtaPushBackend::begin(size_t image_size) {
     this->set_error_("auth_state_read_failed");
     return http_update::OTA_RESPONSE_ERROR_AUTH_INVALID;
   }
-  if (buf[0] == http_update::OTA_RESPONSE_REQUEST_AUTH) {
+  if (buf[0] == OTA_RESPONSE_REQUEST_SHA256_AUTH) {
+    if (!this->authenticate_sha256_())
+      return http_update::OTA_RESPONSE_ERROR_AUTH_INVALID;
+    if (!this->expect_(http_update::OTA_RESPONSE_AUTH_OK, "auth_ok"))
+      return http_update::OTA_RESPONSE_ERROR_AUTH_INVALID;
+  } else if (buf[0] == http_update::OTA_RESPONSE_REQUEST_AUTH) {
     if (!this->authenticate_(buf))
       return http_update::OTA_RESPONSE_ERROR_AUTH_INVALID;
     if (!this->expect_(http_update::OTA_RESPONSE_AUTH_OK, "auth_ok"))
@@ -164,6 +189,55 @@ void OtaPushBackend::abort() {
   }
   this->client_.stop();
   this->started_ = false;
+}
+
+bool OtaPushBackend::authenticate_sha256_() {
+  // Protocol 2 challenge: the device sent auth_type followed by a 64-char hex nonce.
+  // We answer with our own hex cnonce and SHA256(password || nonce || cnonce), the
+  // same digest ESPHomeOTAComponent::handle_auth_read_ recomputes to compare.
+  char nonce[SHA256_HEX_SIZE + 1];
+  if (!this->readall_(reinterpret_cast<uint8_t *>(nonce), SHA256_HEX_SIZE)) {
+    this->set_error_("auth_nonce_read_failed");
+    return false;
+  }
+  nonce[SHA256_HEX_SIZE] = '\0';
+
+  char cnonce[SHA256_HEX_SIZE + 1];
+  char response[SHA256_HEX_SIZE + 1];
+  {
+    // Both hashes are built and consumed inside this scope on purpose: the ESP32-S3
+    // SHA accelerator corrupts results when a hasher crosses a stack frame, which is
+    // why the ESPHome side documents the same rule.
+    char seed[40];
+    snprintf(seed, sizeof(seed), "%08X%08X%08X", random_uint32(), random_uint32(), millis());
+    sha256::SHA256 hasher;
+    hasher.init();
+    hasher.add(reinterpret_cast<const uint8_t *>(seed), strlen(seed));
+    hasher.calculate();
+    hasher.get_hex(cnonce);
+    cnonce[SHA256_HEX_SIZE] = '\0';
+  }
+  {
+    sha256::SHA256 hasher;
+    hasher.init();
+    hasher.add(reinterpret_cast<const uint8_t *>(this->request_.ota_password.c_str()),
+               this->request_.ota_password.length());
+    hasher.add(reinterpret_cast<const uint8_t *>(nonce), SHA256_HEX_SIZE);
+    hasher.add(reinterpret_cast<const uint8_t *>(cnonce), SHA256_HEX_SIZE);
+    hasher.calculate();
+    hasher.get_hex(response);
+    response[SHA256_HEX_SIZE] = '\0';
+  }
+
+  if (!this->writeall_(reinterpret_cast<uint8_t *>(cnonce), SHA256_HEX_SIZE)) {
+    this->set_error_("auth_cnonce_write_failed");
+    return false;
+  }
+  if (!this->writeall_(reinterpret_cast<uint8_t *>(response), SHA256_HEX_SIZE)) {
+    this->set_error_("auth_response_write_failed");
+    return false;
+  }
+  return true;
 }
 
 bool OtaPushBackend::authenticate_(uint8_t *buf) {
