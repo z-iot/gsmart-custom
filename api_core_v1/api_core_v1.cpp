@@ -187,6 +187,11 @@ uint16_t firmware_ota_port_from_model(uint8_t model_num) {
   return model_num == 51 ? 8266 : 3232;
 }
 
+/// A relay holds a TLS download and the OTA push socket open at the same time,
+/// on top of G-Link. Below this there is not enough left for all three, and
+/// starting anyway takes the node down instead of taking the update out.
+static constexpr uint32_t MIN_DELEGATED_OTA_HEAP = 55000;
+
 #if defined(USE_GSMART_OTA_PUSH) && defined(GSMART_EMITTER) && defined(USE_UDPSERVER)
 struct FirmwareTargetResolution {
   std::string ip;
@@ -1220,12 +1225,12 @@ void ApiCoreV1::handle_restart(JsonObject root, JsonObject response) {
   response["delayMs"] = RESTART_DELAY_MS;
 }
 
-void ApiCoreV1::emit_firmware_event_(const char *phase, const std::string &role, const std::string &target_serial,
+bool ApiCoreV1::emit_firmware_event_(const char *phase, const std::string &role, const std::string &target_serial,
                                      const std::string &target_ip, const std::string &version,
                                      const std::string &file_id, const std::string &release_id, uint32_t file_size,
-                                     uint32_t bytes_sent, const char *error) {
+                                     uint32_t bytes_sent, const char *error, const char *trigger) {
   if (!this->firmware_event_emitter_)
-    return;
+    return false;
 
   JsonDocument doc;
   JsonObject body = doc.to<JsonObject>();
@@ -1237,29 +1242,146 @@ void ApiCoreV1::emit_firmware_event_(const char *phase, const std::string &role,
   body["releaseId"] = release_id;
   body["fileSize"] = file_size;
   body["bytesSent"] = bytes_sent;
+  body["trigger"] = trigger != nullptr && trigger[0] != 0 ? trigger : "manual";
   if (file_size > 0 && bytes_sent <= file_size)
     body["percent"] = static_cast<uint32_t>((static_cast<uint64_t>(bytes_sent) * 100ULL) / file_size);
   if (error != nullptr && error[0] != 0)
     body["error"] = error;
-  this->firmware_event_emitter_(phase, body);
+  return this->firmware_event_emitter_(phase, body);
+}
+
+bool ApiCoreV1::report_firmware_event(const char *phase, const std::string &role, const FirmwareUpdatePlan &plan,
+                                      uint32_t bytes_sent, const char *error) {
+  return this->emit_firmware_event_(phase, role, plan.target_serial, plan.target_ip, plan.version, plan.file_id,
+                                    plan.release_id, plan.file_size, bytes_sent, error, plan.trigger.c_str());
+}
+
+FirmwareUpdatePlan parse_firmware_update_plan(JsonObject root) {
+  FirmwareUpdatePlan plan;
+  plan.url = json_string_any(root, "url", "firmware", "url", json_string(nested_value(root, "source", "url")));
+  plan.version = json_string_any(root, "version", "firmware", "version");
+  plan.file_id = json_string_any(root, "fileId", "firmware", "fileId");
+  plan.release_id = json_string_any(root, "releaseId", "firmware", "releaseId");
+  plan.md5 = json_string_any(root, "md5", "firmware", "md5");
+  plan.ota_password = json_string_any(root, "otaPassword", "firmware", "otaPassword");
+  plan.file_size = json_uint32(root["fileSize"], json_uint32(nested_value(root, "firmware", "fileSize"), 0));
+  plan.target_serial = json_string_any(root, "targetSerial", "target", "serial");
+  plan.target_ip = json_string_any(root, "targetIp", "target", "ip");
+  plan.ota_port =
+      static_cast<uint16_t>(json_uint32(root["otaPort"], json_uint32(nested_value(root, "target", "otaPort"), 0)));
+  // Set by the board when it hands out a gzip instead of the raw image, which is
+  // the only way an esp8266 target fits. md5 and fileSize then describe the archive.
+  plan.compressed = json_bool(root["compressed"], json_bool(nested_value(root, "firmware", "compressed"), false));
+  const std::string trigger = json_string_any(root, "trigger", "source", "trigger");
+  if (!trigger.empty())
+    plan.trigger = trigger;
+  return plan;
+}
+
+bool ApiCoreV1::start_self_firmware_update(const FirmwareUpdatePlan &plan, uint32_t delay_ms) {
+#ifdef USE_GSMART_HTTP_UPDATE
+  if (http_update::global_http_update == nullptr) {
+    this->report_firmware_event("failed", "self", plan, 0, "http_update_not_ready");
+    return false;
+  }
+  if (plan.url.empty()) {
+    this->report_firmware_event("failed", "self", plan, 0, "missing_firmware_url");
+    return false;
+  }
+
+  this->report_firmware_event("started", "self", plan);
+  const std::string update_url = plan.url;
+  // Nothing after this point reports anything. A self update that works never
+  // comes back - it reboots into the new image - so the completion has to be
+  // recognised on the next boot instead, by whoever persisted the attempt.
+  this->set_timeout("api_firmware_update_self", delay_ms, [update_url]() {
+    std::vector<http_update::HttpUpdateResponseTrigger *> triggers;
+    http_update::global_http_update->set_url(update_url);
+    http_update::global_http_update->set_method("GET");
+    http_update::global_http_update->flash(triggers);
+    http_update::global_http_update->close();
+  });
+  return true;
+#else
+  this->report_firmware_event("failed", "self", plan, 0, "http_update_not_available");
+  return false;
+#endif
+}
+
+bool ApiCoreV1::push_firmware_to_member(const FirmwareUpdatePlan &plan) {
+#if defined(USE_GSMART_OTA_PUSH) && defined(GSMART_EMITTER)
+  if (ota_push::global_ota_push == nullptr) {
+    this->report_firmware_event("failed", "master", plan, 0, "ota_push_not_ready");
+    return false;
+  }
+  if (plan.md5.length() != 32) {
+    this->report_firmware_event("failed", "master", plan, 0, "missing_firmware_md5");
+    return false;
+  }
+  if (plan.target_ip.empty()) {
+    this->report_firmware_event("failed", "master", plan, 0, "member_ip_unresolved");
+    return false;
+  }
+  // Checked here rather than only at the command, so the nightly run is held to
+  // the same bar: a relay holds a TLS download and the push socket open at once,
+  // and starting it without the headroom takes the node down instead of the
+  // update out.
+  if (ESP.getFreeHeap() < MIN_DELEGATED_OTA_HEAP) {
+    this->report_firmware_event("failed", "master", plan, 0, "low_heap");
+    return false;
+  }
+
+  ota_push::OtaPushRequest request;
+  request.url = plan.url;
+  request.target_ip = plan.target_ip;
+  request.target_port = plan.ota_port != 0 ? plan.ota_port : 3232;
+  request.md5 = plan.md5;
+  request.ota_password = plan.ota_password;
+  request.compressed = plan.compressed;
+
+  this->report_firmware_event("started", "master", plan);
+
+  uint32_t last_event_ms = 0;
+  uint32_t last_percent = 0;
+  const bool ok = ota_push::global_ota_push->push_url(
+      request, [this, &plan, &last_event_ms, &last_percent](size_t sent, size_t total) {
+        const uint32_t now = millis();
+        const uint32_t effective_total = total > 0 ? static_cast<uint32_t>(total) : plan.file_size;
+        const uint32_t percent =
+            effective_total > 0 ? static_cast<uint32_t>((static_cast<uint64_t>(sent) * 100ULL) / effective_total) : 0;
+        if (now - last_event_ms < 1000 && percent < last_percent + 5 && sent < total)
+          return;
+        last_event_ms = now;
+        last_percent = percent;
+        this->emit_firmware_event_("progress", "master", plan.target_serial, plan.target_ip, plan.version,
+                                   plan.file_id, plan.release_id, effective_total, static_cast<uint32_t>(sent),
+                                   nullptr, plan.trigger.c_str());
+      });
+
+  const char *error = ok ? nullptr : ota_push::global_ota_push->last_error().c_str();
+  this->report_firmware_event(ok ? "completed" : "failed", "master", plan, ok ? plan.file_size : 0, error);
+  return ok;
+#else
+  this->report_firmware_event("failed", "master", plan, 0, "delegated_ota_unsupported_on_this_model");
+  return false;
+#endif
 }
 
 void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
   const std::string target_mode = normalize_firmware_target_mode(root);
   const bool dry_run = json_bool(root["dryRun"], json_bool(nested_value(root, "options", "dryRun"), false));
   const bool reboot = json_bool(root["reboot"], json_bool(nested_value(root, "options", "reboot"), true));
-  const std::string url = json_string_any(root, "url", "firmware", "url", json_string(nested_value(root, "source", "url")));
-  const std::string version = json_string_any(root, "version", "firmware", "version");
-  const std::string file_id = json_string_any(root, "fileId", "firmware", "fileId");
-  const std::string release_id = json_string_any(root, "releaseId", "firmware", "releaseId");
-  const std::string md5 = json_string_any(root, "md5", "firmware", "md5");
-  const std::string ota_password = json_string_any(root, "otaPassword", "firmware", "otaPassword");
-  const uint32_t file_size = json_uint32(root["fileSize"], json_uint32(nested_value(root, "firmware", "fileSize"), 0));
-  const std::string target_serial = json_string_any(root, "targetSerial", "target", "serial");
-  const std::string target_ip = json_string_any(root, "targetIp", "target", "ip");
-  // Set by the board when it hands out a gzip instead of the raw image, which is
-  // the only way an esp8266 target fits. md5 and fileSize then describe the archive.
-  const bool compressed = json_bool(root["compressed"], json_bool(nested_value(root, "firmware", "compressed"), false));
+  FirmwareUpdatePlan plan = parse_firmware_update_plan(root);
+  const std::string &url = plan.url;
+  const std::string &version = plan.version;
+  const std::string &file_id = plan.file_id;
+  const std::string &release_id = plan.release_id;
+  const std::string &md5 = plan.md5;
+  const std::string &ota_password = plan.ota_password;
+  const uint32_t file_size = plan.file_size;
+  const std::string &target_serial = plan.target_serial;
+  const std::string &target_ip = plan.target_ip;
+  const bool compressed = plan.compressed;
 
   response["ok"] = true;
   response["accepted"] = dry_run;
@@ -1307,15 +1429,9 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
       return;
     }
 
-    const std::string update_url = url;
-    this->emit_firmware_event_("started", "self", target_serial, target_ip, version, file_id, release_id, file_size, 0);
-    this->set_timeout("api_firmware_update_self", 250, [update_url]() {
-      std::vector<http_update::HttpUpdateResponseTrigger *> triggers;
-      http_update::global_http_update->set_url(update_url);
-      http_update::global_http_update->set_method("GET");
-      http_update::global_http_update->flash(triggers);
-      http_update::global_http_update->close();
-    });
+    // The 250 ms is what lets this command answer before the device goes off the
+    // air to download; the nightly check has nobody waiting and passes 0.
+    this->start_self_firmware_update(plan, 250);
     response["scheduled"] = true;
     response["delayMs"] = 250;
 #else
@@ -1379,7 +1495,7 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
     }
 
     std::string resolved_ip = target_ip;
-    uint16_t target_port = static_cast<uint16_t>(json_uint32(root["otaPort"], json_uint32(nested_value(root, "target", "otaPort"), 0)));
+    uint16_t target_port = plan.ota_port;
 #if defined(USE_UDPSERVER)
     if (resolved_ip.empty() && target_mode == "regionMember") {
       const FirmwareTargetResolution resolution = resolve_region_member_target(target_serial);
@@ -1400,7 +1516,6 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
       return;
     }
 
-    static constexpr uint32_t MIN_DELEGATED_OTA_HEAP = 55000;
     if (ESP.getFreeHeap() < MIN_DELEGATED_OTA_HEAP) {
       response["ok"] = false;
       response["accepted"] = false;
@@ -1418,54 +1533,12 @@ void ApiCoreV1::handle_firmware_update(JsonObject root, JsonObject response) {
     target["ip"] = resolved_ip;
     target["otaPort"] = target_port;
 
-    const std::string update_url = url;
-    const std::string wire_md5 = md5;
-    const std::string password = ota_password;
-    const std::string scheduled_target_serial = target_serial;
-    const std::string scheduled_target_ip = resolved_ip;
-    const std::string scheduled_version = version;
-    const std::string scheduled_file_id = file_id;
-    const std::string scheduled_release_id = release_id;
-    const uint32_t scheduled_file_size = file_size;
-    this->emit_firmware_event_("started", "master", scheduled_target_serial, scheduled_target_ip, scheduled_version,
-                               scheduled_file_id, scheduled_release_id, scheduled_file_size, 0);
-    const bool scheduled_compressed = compressed;
+    plan.target_ip = resolved_ip;
+    plan.ota_port = target_port;
+    // Deferred, not inline: the push blocks for the whole download and stream,
+    // and this command still owes its caller an answer.
     this->set_timeout("api_firmware_update_delegated", 250,
-                      [this, update_url, wire_md5, password, scheduled_target_ip, target_port, scheduled_target_serial,
-                       scheduled_version, scheduled_file_id, scheduled_release_id, scheduled_file_size,
-                       scheduled_compressed]() {
-                        ota_push::OtaPushRequest request;
-                        request.url = update_url;
-                        request.target_ip = scheduled_target_ip;
-                        request.target_port = target_port;
-                        request.md5 = wire_md5;
-                        request.ota_password = password;
-                        request.compressed = scheduled_compressed;
-                        uint32_t last_event_ms = 0;
-                        uint32_t last_percent = 0;
-                        const bool ok = ota_push::global_ota_push->push_url(request, [this, scheduled_target_serial,
-                                                                                       scheduled_target_ip, scheduled_version,
-                                                                                       scheduled_file_id,
-                                                                                       scheduled_release_id,
-                                                                                       scheduled_file_size, &last_event_ms,
-                                                                                       &last_percent](size_t sent, size_t total) {
-                          const uint32_t now = millis();
-                          const uint32_t effective_total = total > 0 ? static_cast<uint32_t>(total) : scheduled_file_size;
-                          const uint32_t percent =
-                              effective_total > 0 ? static_cast<uint32_t>((static_cast<uint64_t>(sent) * 100ULL) / effective_total) : 0;
-                          if (now - last_event_ms < 1000 && percent < last_percent + 5 && sent < total)
-                            return;
-                          last_event_ms = now;
-                          last_percent = percent;
-                          this->emit_firmware_event_("progress", "master", scheduled_target_serial, scheduled_target_ip,
-                                                     scheduled_version, scheduled_file_id, scheduled_release_id, effective_total,
-                                                     static_cast<uint32_t>(sent));
-                        });
-                        const char *error = ok ? nullptr : ota_push::global_ota_push->last_error().c_str();
-                        this->emit_firmware_event_(ok ? "completed" : "failed", "master", scheduled_target_serial,
-                                                   scheduled_target_ip, scheduled_version, scheduled_file_id,
-                                                   scheduled_release_id, scheduled_file_size, ok ? scheduled_file_size : 0, error);
-                      });
+                      [this, plan]() { this->push_firmware_to_member(plan); });
     return;
 #else
     response["ok"] = false;

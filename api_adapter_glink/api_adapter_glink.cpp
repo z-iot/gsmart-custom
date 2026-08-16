@@ -125,7 +125,8 @@ void ApiAdapterGLink::setup() {
     return;
   }
   this->core_->set_glink_diagnostics_provider([this](JsonObject root) { this->build_diagnostics_(root); });
-  this->core_->set_firmware_event_emitter([this](const char *phase, JsonObject body) { this->send_firmware_event_(phase, body); });
+  this->core_->set_firmware_event_emitter(
+      [this](const char *phase, JsonObject body) { return this->send_firmware_event_(phase, body); });
 
   if (this->url_.empty() || this->promoss_secret_.empty()) {
     ESP_LOGE(TAG, "G-Link url and promoss_secret are required");
@@ -608,12 +609,15 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
   });
 }
 
-void ApiAdapterGLink::send_firmware_event_(const char *phase, JsonObject body) {
+bool ApiAdapterGLink::send_firmware_event_(const char *phase, JsonObject body) {
+  // Answering false rather than dropping it silently: a firmware update that
+  // finished while the link was down still has to be reported, and only the
+  // caller knows whether this one is worth holding on to and retrying.
   if (!this->authenticated_)
-    return;
+    return false;
 
   const char *safe_phase = phase != nullptr && phase[0] != 0 ? phase : "progress";
-  this->send_frame_("event", "device", this->next_frame_id_("event"), [this, safe_phase, body](JsonObject payload) {
+  return this->send_frame_("event", "device", this->next_frame_id_("event"), [this, safe_phase, body](JsonObject payload) {
     payload["kind"] = std::string("firmware.update.") + safe_phase;
     payload["level"] = this->event_level_;
     JsonObject out = payload["body"].to<JsonObject>();
