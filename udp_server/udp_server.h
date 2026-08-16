@@ -140,6 +140,9 @@ namespace esphome
       void sendMessage(bool main, PacketKind kind, const uint8_t *bodyData, uint16_t bodyLen);
       uint64_t currentRegionId() const;
       bool packetRegionAllowed(uint64_t region_id) const;
+      bool selfIsRegionMember() const;
+      bool regionControlAllowed(uint64_t region_id, const uint8_t sender_mac[6]) const;
+      bool regionIntentAllowed(uint64_t region_id, const uint8_t origin_mac[6]) const;
       bool managementPacketAllowed(const PacketManagement &packet, bool main) const;
       bool targetMacMatches(const uint8_t target_mac[6]) const;
       void applyManagementPacket(const PacketManagement &packet, bool main);

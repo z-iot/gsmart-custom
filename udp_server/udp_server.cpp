@@ -112,6 +112,49 @@ namespace esphome
       return current_region_id != 0 && region_id == current_region_id;
     }
 
+    bool UdpServer::selfIsRegionMember() const
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store != nullptr && storage::store->region != nullptr)
+        return storage::store->region->selfIndex >= 0;
+#endif
+      return false;
+    }
+
+    // Radiation is not gated by the region number alone.
+    //
+    // The number survives everything: a kus that was taken out of the room in
+    // the cloud, a region deleted in G-Board, a layout wiped from the app - all
+    // of those leave the old serial in flash, and matching on it alone meant one
+    // room's master switched on lamps that nobody could see it owned. Whoever
+    // commands the room has to be its master, and whoever obeys has to be in the
+    // layout that master pushed.
+    bool UdpServer::regionControlAllowed(uint64_t region_id, const uint8_t sender_mac[6]) const
+    {
+      if (!this->packetRegionAllowed(region_id))
+        return false;
+      if (!this->selfIsRegionMember())
+        return false;
+      return this->packetSenderIsRegionMaster(sender_mac);
+    }
+
+    // The way back: a member's button asks the master to switch the whole room.
+    // Same rule from the other side - the ask counts only from a kus that is in
+    // the layout, otherwise a leftover serial turns a stranger's button into a
+    // switch for this room.
+    bool UdpServer::regionIntentAllowed(uint64_t region_id, const uint8_t origin_mac[6]) const
+    {
+      if (!this->packetRegionAllowed(region_id))
+        return false;
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr)
+        return false;
+      return storage::store->region->isMemberMac(origin_mac);
+#else
+      return false;
+#endif
+    }
+
     bool UdpServer::targetMacMatches(const uint8_t target_mac[6]) const
     {
       uint8_t local_mac[6];
@@ -893,9 +936,9 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketControl *packetControl = reinterpret_cast<PacketControl *>(data);
-          if (!this->packetRegionAllowed(packetControl->region_id))
+          if (!this->regionControlAllowed(packetControl->region_id, packetControl->mac))
           {
-            ESP_LOGD(TAG, "Ignoring Control for another region.");
+            ESP_LOGD(TAG, "Ignoring Control: not from this region's master, or this device is not in its layout.");
             break;
           }
           if (this->targetMacMatches(packetControl->mac))
@@ -992,9 +1035,9 @@ namespace esphome
         {
           auto *data = packet.body.data();
           PacketRegionIntent *packetRegionIntent = reinterpret_cast<PacketRegionIntent *>(data);
-          if (!this->packetRegionAllowed(packetRegionIntent->region_id))
+          if (!this->regionIntentAllowed(packetRegionIntent->region_id, packetRegionIntent->origin_mac))
           {
-            ESP_LOGD(TAG, "Ignoring RegionIntent for another region.");
+            ESP_LOGD(TAG, "Ignoring RegionIntent: origin is not a member of this region.");
             break;
           }
           if (this->targetMacMatches(packetRegionIntent->origin_mac))

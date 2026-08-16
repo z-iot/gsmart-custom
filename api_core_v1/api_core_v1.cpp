@@ -898,9 +898,15 @@ bool ApiCoreV1::apply_region(JsonObject root) {
 #ifdef GSMART_FEATURE_REGION
   const uint16_t old_udp_channel = storage::store->region->metadata.udpChannel;
 
+  // An explicitly empty regionId is a request to forget the region, not a
+  // missing field. The two are told apart by whether the key was sent at all -
+  // without that, "clear this device" and "keep whatever you have" look the
+  // same on the wire.
+  const bool region_id_sent = !root["regionId"].isNull() || !root["serial"].isNull();
   std::string region_id = json_string(root["regionId"]);
   if (region_id.empty())
     region_id = json_string(root["serial"]);
+  const bool clear_requested = region_id_sent && region_id.empty();
   if (!region_id.empty())
     storage::store->region->layout.serial = storage::convertRegionSerialtoNum(region_id);
 
@@ -946,6 +952,21 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     storage::store->region->reloadFromJson(compact);
   } else {
     storage::store->region->reloadFromJson(root);
+  }
+
+  // A write that does not list this device is a removal, not a configuration.
+  //
+  // It used to only empty the member table, and `loadFromJson` deliberately
+  // carries the old serial across - so a "cleared" kus kept the number the UDP
+  // layer matches on and went on switching with the room it had been taken out
+  // of. Forget the region outright and fall back to the main multicast, which
+  // is where an unassigned kus is found and adopted again.
+  const bool detached = clear_requested || !storage::store->region->hasMembers() ||
+                        storage::store->region->selfIndex < 0;
+  if (detached) {
+    ESP_LOGI(TAG, "Region write does not include this device; clearing region %s.",
+             storage::convertRegionSerialtoStr(storage::store->region->layout.serial).c_str());
+    storage::store->region->clear();
   }
 
   storage::store->region->bumpConfigVersion();
@@ -1101,6 +1122,25 @@ bool ApiCoreV1::handle_control_mode(JsonObject root, JsonObject response) {
     response["ok"] = false;
     response["error"] = "not_region_master";
     response["message"] = "Only the region master can control the whole region.";
+    return false;
+  }
+
+  // The caller names the room it means to switch. Until now that name was read
+  // back into the answer and never checked, so a master that had been moved to
+  // a different region happily switched the room it was in now and reported
+  // success for the one the app asked about.
+  //
+  // Only a value that parses as a region serial is worth comparing. Callers are
+  // allowed to pass a cloud record id here and always have been; rejecting on
+  // that would break them without telling anyone anything true.
+  const std::string requested_region = json_string(root["regionId"]);
+  const uint64_t requested_serial = storage::convertRegionSerialtoNum(requested_region);
+  if (requested_serial != 0 && requested_serial != storage::store->region->layout.serial) {
+    response["ok"] = false;
+    response["error"] = "region_mismatch";
+    response["message"] = "This device is the master of a different region.";
+    response["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
+    response["requestedRegionId"] = requested_region;
     return false;
   }
 
