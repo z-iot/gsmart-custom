@@ -541,7 +541,7 @@ void ApiCoreV1::build_status(JsonObject root) {
   region["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
   region["selfIndex"] = storage::store->region->selfIndex;
   region["masterIndex"] = storage::store->region->layout.masterIndex;
-  region["udpChannel"] = storage::store->region->metadata.udpChannel;
+  region["udpChannel"] = storage::store->region->activeRegionPort();
   add_region_runtime(region);
 #endif
 }
@@ -874,9 +874,12 @@ void ApiCoreV1::build_region(JsonObject root) {
   root["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
   root["regionName"] = storage::store->region->metadata.name;
   root["regionDescription"] = storage::store->region->metadata.description;
-  root["udpChannel"] = storage::store->region->metadata.udpChannel;
-  root["regionNum"] = storage::store->region->metadata.udpChannel;
-  root["configVersion"] = storage::store->region->metadata.configVersion;
+  root["regionFormat"] = storage::store->region->metadata.format;
+  root["regionPort"] = storage::store->region->metadata.regionPort;
+  root["regionVersion"] = storage::store->region->metadata.regionVersion;
+  root["udpChannel"] = storage::store->region->metadata.legacyChannel;
+  root["regionNum"] = storage::store->region->metadata.legacyChannel;
+  root["configVersion"] = storage::store->region->metadata.regionVersion;
   root["masterIndex"] = storage::store->region->layout.masterIndex;
   root["selfIndex"] = storage::store->region->selfIndex;
   root["isMaster"] = storage::store->region->isMaster();
@@ -901,7 +904,7 @@ void ApiCoreV1::build_region(JsonObject root) {
 
 bool ApiCoreV1::apply_region(JsonObject root) {
 #ifdef GSMART_FEATURE_REGION
-  const uint16_t old_udp_channel = storage::store->region->metadata.udpChannel;
+  const uint16_t old_region_port = storage::store->region->activeRegionPort();
 
   // An explicitly empty regionId is a request to forget the region, not a
   // missing field. The two are told apart by whether the key was sent at all -
@@ -979,15 +982,15 @@ bool ApiCoreV1::apply_region(JsonObject root) {
 
 #ifdef USE_UDPSERVER
   if (udp_server::udpServer != nullptr) {
-    if (old_udp_channel != 0 && old_udp_channel != storage::store->region->metadata.udpChannel)
+    const uint16_t new_region_port = storage::store->region->activeRegionPort();
+    if (old_region_port != 0 && old_region_port != new_region_port)
       udp_server::udpServer->sendRegionLayoutPush(false);
-    else if (old_udp_channel == 0)
+    else if (old_region_port == 0)
       udp_server::udpServer->sendRegionLayoutPush(true);
 
-    if (storage::store->region->metadata.udpChannel != old_udp_channel)
-      udp_server::udpServer->changeChannel(storage::store->region->metadata.udpChannel);
+    udp_server::udpServer->applyRegionNetwork();
 
-    udp_server::udpServer->sendRegionLayoutPush(storage::store->region->metadata.udpChannel == 0);
+    udp_server::udpServer->sendRegionLayoutPush(new_region_port == 0);
     udp_server::udpServer->sendSituationInfo();
     udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
   }

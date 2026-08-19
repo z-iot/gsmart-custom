@@ -77,14 +77,25 @@ namespace esphome
       float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
       void dump_config() override;
 
+      /// Prepne na konkretny UDP port miestnosti. Cislo je port, nie kanal.
       void changeChannel(uint16_t channel);
+      /// Rucny prepinac kanala (0-999) zo servisneho UI a zo starej konfiguracie.
+      /// Cislo kanala nie je port - prepocitava sa tu, aby to nemusela vediet
+      /// kazda lambda vo YAML-e.
+      void changeLegacyChannel(uint16_t channel);
 
       void set_port(uint16_t port) { port_ = port; }
       void set_channel(uint16_t channel) { channel_ = channel; }
       uint16_t get_port() const { return port_; }
       uint16_t get_channel() const { return channel_; }
 
+      /// Adresa miestnosti podla jej `regionPort`. Jedno cislo urcuje aj
+      /// skupinu, aj port - nie je co rozladit.
+      static IPAddress getMulticastIpforRegionPort(uint16_t region_port);
+      /// Mapovanie formatu 1. Drzi sa kvoli miestnostiam, ktore este neprešli.
       static IPAddress getMulticastIpforChannel(uint16_t channel);
+      /// Prepocita sietovu vrstvu podla toho, co je prave v ulozisku regionu.
+      void applyRegionNetwork();
 
       void add_on_neighbor_callback(std::function<void(DeviceItem *deviceItem)> &&callback) { this->neighbor_callback_.add(std::move(callback)); }
       void add_on_control_callback(std::function<void(PacketControl packet)> &&callback) { this->control_callback_.add(std::move(callback)); }
@@ -103,6 +114,7 @@ namespace esphome
       void sendSituationInfo();
       void sendRegionLayoutPush(bool main = false);
       void sendRegionLayoutRequest();
+      void sendRegionLayoutAnnounce();
       void sendRegionIntent(storage::RadiationMode mode, KindRadiationSource source);
       void sendPingReq();
       void sendPingRes();

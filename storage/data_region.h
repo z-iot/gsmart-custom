@@ -28,7 +28,40 @@ namespace esphome
       RegionMember members[16];
     };
 
+    /// Ako je region ulozeny a ako sa o nom hovori na sieti.
+    ///
+    /// Format 1 je vsetko, co bolo pred tymto cislom: kanal 10-250, adresa
+    /// 230.x, verzia ako 32-bit pecialka. Format 2 nesie regionPort, ktory je
+    /// zaroven identita aj UDP port, adresu v 239.192.0.0/16 a 16-bitovu verziu.
+    ///
+    /// Kus, ktory najde ulozeny iny format, nesmie svojmu zaznamu verit -
+    /// vypyta si novy (master z cloudu, clen od mastera na spolocnej adrese).
+    static constexpr uint8_t kRegionFormat = 2;
+
+    /// Rozsah portov, z ktoreho cloud prideluje regionPort. Firmvér ho
+    /// nevynucuje, len sa podla neho rozhoduje, ci je hodnota vobec pouzitelna.
+    static constexpr uint16_t kRegionPortMin = 30101;
+    static constexpr uint16_t kRegionPortMax = 49151;
+
     struct RegionMetadata
+    {
+      /// `0` znamena zaznam spred formatu 2 - vtedy plati `legacyChannel`.
+      uint8_t format = 0;
+      /// Identita miestnosti na sieti **a** port, na ktorom si jej kusy hovoria.
+      uint16_t regionPort = 0;
+      /// Pocitadlo zmien obsahu. Zvysuje ho vylucne cloud a nepretaca sa.
+      uint16_t regionVersion = 0;
+      /// Stary kanal 10-250. Drzi sa preto, aby miestnost bezala aj po nahrati
+      /// firmveru dovtedy, kym jej cloud posle regionPort - a aby sa da nou
+      /// rozpravat s kusmi, ktore na format 2 este neprešli.
+      uint16_t legacyChannel = 0;
+      char name[48] = {0};
+      char description[128] = {0};
+    };
+
+    /// Zaznam, ktory na kuse zostal z formatu 1. Cita sa raz, pri prvom starte
+    /// noveho firmveru, aby miestnost nezostala bez mena a bez kanala.
+    struct LegacyRegionMetadata
     {
       char name[48] = {0};
       char description[128] = {0};
@@ -92,12 +125,50 @@ namespace esphome
           copyString(this->metadata.description, sizeof(this->metadata.description), root["regionDescription"].as<std::string>());
         if (!root["description"].isNull())
           copyString(this->metadata.description, sizeof(this->metadata.description), root["description"].as<std::string>());
+        // Format 1 posielal cislo kanala. Berie sa uz len ako zaloha: kym cloud
+        // neposle regionPort, miestnost bezi po starom a rozprava sa aj s kusmi,
+        // ktore na format 2 este neprešli.
         if (!root["udpChannel"].isNull())
-          this->metadata.udpChannel = root["udpChannel"].as<uint16_t>();
+          this->metadata.legacyChannel = root["udpChannel"].as<uint16_t>();
         if (!root["regionNum"].isNull())
-          this->metadata.udpChannel = root["regionNum"].as<uint16_t>();
+          this->metadata.legacyChannel = root["regionNum"].as<uint16_t>();
         if (!root["configVersion"].isNull())
-          this->metadata.configVersion = root["configVersion"].as<uint32_t>();
+          this->metadata.regionVersion = clampRegionVersion(root["configVersion"].as<uint32_t>());
+
+        if (!root["regionPort"].isNull())
+          this->metadata.regionPort = root["regionPort"].as<uint16_t>();
+        if (!root["regionVersion"].isNull())
+          this->metadata.regionVersion = clampRegionVersion(root["regionVersion"].as<uint32_t>());
+        // Format prijima len ten, kto ho posle. Zapis bez neho je zapis podla
+        // stareho protokolu a nesmie sa tvarit, ze kus uz presiel.
+        if (!root["regionFormat"].isNull())
+          this->metadata.format = root["regionFormat"].as<uint8_t>();
+        else if (!root["regionPort"].isNull())
+          this->metadata.format = kRegionFormat;
+      }
+
+      /// Verzia sa nepretaca. Cloud ju nad stropom uz nezvysi a povie, ze
+      /// miestnost treba zalozit nanovo; firmvér preto len oreze, co pride.
+      static uint16_t clampRegionVersion(uint32_t value)
+      {
+        return value > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(value);
+      }
+
+      /// Bezi tento kus uz podla formatu 2?
+      bool usesRegionFormat2() const
+      {
+        return this->metadata.format == kRegionFormat && this->metadata.regionPort != 0;
+      }
+
+      /// Port, na ktorom sa tato miestnost prave rozprava. `0` znamena, ze kus
+      /// nema kde - vtedy pocuva len na spolocnej adrese a pyta si konfiguraciu.
+      uint16_t activeRegionPort() const
+      {
+        if (this->usesRegionFormat2())
+          return this->metadata.regionPort;
+        if (this->metadata.legacyChannel != 0)
+          return static_cast<uint16_t>(30100 + this->metadata.legacyChannel);
+        return 0;
       }
 
       void recalculateLayout()
@@ -170,11 +241,17 @@ namespace esphome
         return this->layout.memberCount > 0;
       }
 
+      /// Zvysenie verzie po lokalnom zapise.
+      ///
+      /// Verziu vlastni cloud; toto je len poistka pre zapis, ktory prisiel bez
+      /// nej (stara appka, servisny zasah po LAN-e). Na strope sa zastavi -
+      /// pretocit ju na nulu by znamenalo, ze kazdy dalsi push bude vyzerat
+      /// starsie nez to, co uz kus ma, a miestnost by sa prestala aktualizovat.
       void bumpConfigVersion()
       {
-        this->metadata.configVersion++;
-        if (this->metadata.configVersion == 0)
-          this->metadata.configVersion = 1;
+        if (this->metadata.regionVersion == 0xFFFF)
+          return;
+        this->metadata.regionVersion++;
       }
 
       void saveToJson(JsonObject &root)
@@ -183,9 +260,14 @@ namespace esphome
         root["mst"] = this->layout.masterIndex;
         root["regionName"] = this->metadata.name;
         root["regionDescription"] = this->metadata.description;
-        root["udpChannel"] = this->metadata.udpChannel;
-        root["regionNum"] = this->metadata.udpChannel;
-        root["configVersion"] = this->metadata.configVersion;
+        root["regionFormat"] = this->metadata.format;
+        root["regionPort"] = this->metadata.regionPort;
+        root["regionVersion"] = this->metadata.regionVersion;
+        // Stare kluce sa este vypisuju, aby appka a cloud, ktore format 2 zatial
+        // neposielaju, nedostali prazdno tam, kde doteraz cakali cislo.
+        root["udpChannel"] = this->metadata.legacyChannel;
+        root["regionNum"] = this->metadata.legacyChannel;
+        root["configVersion"] = this->metadata.regionVersion;
         JsonArray memArray = root["mem"].to<JsonArray>();
         for (int i = 0; i < this->layout.memberCount; i++)
         {
@@ -208,6 +290,7 @@ namespace esphome
       void setup();
       void save();
       void saveMetadata();
+      void adoptLegacyMetadata();
       void clear();
 
       RegionLayout layout;
@@ -215,6 +298,7 @@ namespace esphome
       int16_t selfIndex = -1;
       ESPPreferenceObject pref{};
       ESPPreferenceObject metadata_pref{};
+      ESPPreferenceObject legacy_metadata_pref{};
 
     protected:
       void copyString(char *target, size_t target_size, const std::string &value)

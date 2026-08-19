@@ -240,6 +240,8 @@ namespace esphome
         return "PUSH";
       case RegionLayoutAction::RESPONSE:
         return "RESPONSE";
+      case RegionLayoutAction::ANNOUNCE:
+        return "ANNOUNCE";
       default:
         return "--unknown--";
       }
@@ -252,8 +254,11 @@ namespace esphome
                                 root["mac"] = macToStr(packet.mac);
                                 root["regionId"] = storage::convertRegionSerialtoStr(packet.region_id);
                                 root["action"] = regionLayoutActionToStr(packet.action);
-                                root["udpChannel"] = packet.udp_channel;
-                                root["configVersion"] = packet.config_version;
+                                root["regionFormat"] = packet.region_format;
+                                root["regionPort"] = packet.region_port;
+                                root["udpChannel"] = packet.legacy_channel;
+                                root["regionVersion"] = packet.region_version;
+                                root["configVersion"] = packet.region_version;
                                 root["masterIndex"] = packet.master_index;
                                 root["memberCount"] = packet.member_count;
                                 JsonArray members = root["members"].to<JsonArray>();

@@ -8,6 +8,10 @@
 #define MESSAGE_SYSINFO_REPEAT_SEC 3600*3
 #define MESSAGE_STATUSINFO_REPEAT_SEC 60
 #define MESSAGE_IDENTITYINFO_REPEAT_SEC 5*60
+// Master sa raz za hodinu ohlasi na spolocnej adrese. Stvorsto masterov je
+// stvorsto paketov za hodinu - na sieti nic, a technik vdaka tomu vidi, co je
+// v budove, bez toho aby sa pytal cloudu.
+#define MESSAGE_REGION_ANNOUNCE_REPEAT_SEC 3600
 
 #define UDP_PROTOCOL_VERSION 2
 #define DEVICE_MODEL_UNKNOWN 0
@@ -225,20 +229,40 @@ namespace esphome
       REQUEST = 1,
       PUSH = 2,
       RESPONSE = 3,
+      /// Master sa raz za hodinu ohlasi na spolocnej adrese. Nie je to push -
+      /// prijemca podla toho nic neprepisuje, len sa dozvie, ze miestnost
+      /// existuje a s akymi parametrami. Technik ju tak vidi bez cloudu.
+      ANNOUNCE = 4,
     };
 
     std::string regionLayoutActionToStr(RegionLayoutAction item);
 
+    /// Zlozenie miestnosti na drote.
+    ///
+    /// Struktura sa posiela ako surove bajty, takze kazda zmena poli je zmenou
+    /// protokolu - preto ide ruka v ruke s `regionFormat`. Nazov tu pribudol
+    /// zamerne: bez neho si clen po push-i ulozil novu verziu a stary nazov,
+    /// takze verzia tvrdila „som aktualny" o zazname, ktory aktualny nebol.
     struct PacketRegionLayout
     {
       uint8_t mac[6];
       uint64_t region_id;
       RegionLayoutAction action;
-      uint16_t udp_channel;
-      uint32_t config_version;
+      /// Format ulozenia, ktory odosielatel pouziva. Prijemca s inym cislom
+      /// nema paket ako prijat - povie si o konfiguraciu sam.
+      uint8_t region_format;
+      /// Identita miestnosti na sieti a zaroven jej UDP port.
+      uint16_t region_port;
+      /// Stary kanal 10-250, kym miestnost neprejde cela na format 2.
+      uint16_t legacy_channel;
+      uint16_t region_version;
       uint8_t master_index;
       uint8_t member_count;
       storage::RegionMember members[16];
+      /// Nazov miestnosti, dlzka + bajty. Popis sa neposiela - na zariadeni sa
+      /// nikde nezobrazuje a v pakete by bral 128 bajtov za nic.
+      uint8_t name_len;
+      char name[48];
     };
 
     std::string packetRegionLayoutToJsonStr(PacketRegionLayout packet);

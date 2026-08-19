@@ -238,8 +238,10 @@ namespace esphome
         {
           if (packet.new_region_id != 0)
             storage::store->region->layout.serial = packet.new_region_id;
+          // Servisny SET_REGION nesie stary kanal. Zapisuje sa ako zaloha; port
+          // formatu 2 prideluje vylucne cloud, takze sa tu nevymysla.
           if (packet.udp_channel != 0)
-            storage::store->region->metadata.udpChannel = packet.udp_channel;
+            storage::store->region->metadata.legacyChannel = packet.udp_channel;
           if (packet.region_name[0] != 0)
           {
             strncpy(storage::store->region->metadata.name, packet.region_name,
@@ -248,11 +250,10 @@ namespace esphome
           }
           storage::store->region->recalculateLayout();
           storage::store->region->save();
-          if (storage::store->region->metadata.udpChannel != 0)
-            this->changeChannel(storage::store->region->metadata.udpChannel);
+          this->applyRegionNetwork();
           ESP_LOGI(TAG, "Management SET_REGION applied: %s channel %u",
                    storage::convertRegionSerialtoStr(storage::store->region->layout.serial).c_str(),
-                   storage::store->region->metadata.udpChannel);
+                   storage::store->region->activeRegionPort());
         }
 #endif
         break;
@@ -336,27 +337,43 @@ namespace esphome
         ESP_LOGD(TAG, "Ignoring region layout for another region.");
         return;
       }
-      if (storage::store->region->metadata.configVersion > packet.config_version)
+      // Format 1 uz layout rozosielat nesmie. Kus na formate 2 by z neho prevzal
+      // zlozenie bez portu a spadol by spat na stary kanal - cize by sa prechod
+      // vracal dozadu pri kazdom push-i od kusu, ktory este nepresiel.
+      if (packet.region_format != storage::kRegionFormat)
+      {
+        ESP_LOGD(TAG, "Ignoring region layout in format %u; this device speaks %u.",
+                 packet.region_format, storage::kRegionFormat);
+        return;
+      }
+      if (storage::store->region->metadata.regionVersion > packet.region_version)
       {
         ESP_LOGD(TAG, "Ignoring older region layout version %u; local %u.",
-                 packet.config_version, storage::store->region->metadata.configVersion);
+                 packet.region_version, storage::store->region->metadata.regionVersion);
         return;
       }
 
-      storage::store->region->layout.serial = packet.region_id;
-      storage::store->region->layout.masterIndex = packet.master_index;
-      storage::store->region->layout.memberCount = packet.member_count;
+      auto *region = storage::store->region;
+      region->layout.serial = packet.region_id;
+      region->layout.masterIndex = packet.master_index;
+      region->layout.memberCount = packet.member_count;
       for (int i = 0; i < packet.member_count; i++)
-        storage::store->region->layout.members[i] = packet.members[i];
-      storage::store->region->metadata.udpChannel = packet.udp_channel;
-      storage::store->region->metadata.configVersion = packet.config_version;
-      storage::store->region->recalculateLayout();
-      storage::store->region->save();
-      if (packet.udp_channel != channel_)
-        this->changeChannel(packet.udp_channel);
-      ESP_LOGI(TAG, "Applied region layout %s version %u channel %u.",
+        region->layout.members[i] = packet.members[i];
+      region->metadata.format = packet.region_format;
+      region->metadata.regionPort = packet.region_port;
+      region->metadata.legacyChannel = packet.legacy_channel;
+      region->metadata.regionVersion = packet.region_version;
+
+      const uint8_t name_len = packet.name_len < sizeof(packet.name) ? packet.name_len : sizeof(packet.name);
+      memset(region->metadata.name, 0, sizeof(region->metadata.name));
+      memcpy(region->metadata.name, packet.name, name_len);
+
+      region->recalculateLayout();
+      region->save();
+      this->applyRegionNetwork();
+      ESP_LOGI(TAG, "Applied region layout %s version %u port %u.",
                storage::convertRegionSerialtoStr(packet.region_id).c_str(),
-               packet.config_version, packet.udp_channel);
+               packet.region_version, packet.region_port);
 #endif
     }
 
@@ -484,12 +501,38 @@ namespace esphome
 #endif
     }
 
+    /// Master sa ohlasi na spolocnej adrese.
+    ///
+    /// Nie je to push - prijemca podla toho nic neprepisuje. Je to jedina veta,
+    /// z ktorej sa da bez cloudu zistit, ake miestnosti v budove su a s akymi
+    /// parametrami bezia; a je to adresa, na ktorej sa vie ozvat aj kus, ktory
+    /// po novom firmvéri este nevie, na ktorom porte jeho miestnost hovori.
+    void UdpServer::sendRegionLayoutAnnounce()
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isMaster())
+        return;
+      PacketRegionLayout packet = fillRegionLayout(RegionLayoutAction::ANNOUNCE);
+      sendRegionLayout(packet, true);
+#endif
+    }
+
     void UdpServer::sendRegionLayoutRequest()
     {
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
       if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isRegionActive())
         return;
       PacketRegionLayout packet = fillRegionLayout(RegionLayoutAction::REQUEST);
+
+      // Kus, ktory nebezi na aktualnom formate, nema kde inde pytat: port svojej
+      // miestnosti este nepozna a stary kanal uz nemusi nikto pocuvat. Spolocna
+      // adresa je jedine miesto, kde je master isto k zastihnutiu.
+      if (!storage::store->region->usesRegionFormat2())
+      {
+        sendRegionLayout(packet, true);
+        return;
+      }
+
       if (channel_ != 0)
         sendRegionLayout(packet, false);
       if (channel_ == 0 || !storage::store->region->hasMembers())
@@ -637,12 +680,21 @@ namespace esphome
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
       if (storage::store != nullptr && storage::store->region != nullptr)
       {
-        packet.udp_channel = storage::store->region->metadata.udpChannel;
-        packet.config_version = storage::store->region->metadata.configVersion;
-        packet.master_index = storage::store->region->layout.masterIndex;
-        packet.member_count = storage::store->region->layout.memberCount > 16 ? 16 : storage::store->region->layout.memberCount;
+        auto *region = storage::store->region;
+        packet.region_format = region->metadata.format;
+        packet.region_port = region->metadata.regionPort;
+        packet.legacy_channel = region->metadata.legacyChannel;
+        packet.region_version = region->metadata.regionVersion;
+        packet.master_index = region->layout.masterIndex;
+        packet.member_count = region->layout.memberCount > 16 ? 16 : region->layout.memberCount;
         for (int i = 0; i < packet.member_count; i++)
-          packet.members[i] = storage::store->region->layout.members[i];
+          packet.members[i] = region->layout.members[i];
+
+        // Nazov ide s layoutom. Bez neho si clen ulozil novu verziu a stary
+        // nazov, takze verzia tvrdila „som aktualny" o zazname, ktory taky nebol.
+        const size_t name_len = strnlen(region->metadata.name, sizeof(packet.name));
+        packet.name_len = static_cast<uint8_t>(name_len);
+        memcpy(packet.name, region->metadata.name, name_len);
       }
 #endif
       return packet;
@@ -676,8 +728,7 @@ namespace esphome
     void UdpServer::setup()
     {
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
-      if (storage::store != nullptr && storage::store->region != nullptr && storage::store->region->metadata.udpChannel != 0)
-        this->changeChannel(storage::store->region->metadata.udpChannel);
+      this->applyRegionNetwork();
 #endif
       this->set_timeout("SysInfoInit", 3000, [this]
                         { this->sendSysInfo(); });
@@ -689,6 +740,20 @@ namespace esphome
                          { this->sendSituationInfo(); });
       this->set_interval(MESSAGE_IDENTITYINFO_REPEAT_SEC * 1000, [this]()
                          { this->sendIdentityInfo(); });
+      this->set_interval(MESSAGE_REGION_ANNOUNCE_REPEAT_SEC * 1000, [this]()
+                         { this->sendRegionLayoutAnnounce(); });
+    }
+
+    /// Adresa miestnosti formatu 2.
+    ///
+    /// `239.0.0.0/8` je administrativne vyhradeny rozsah (RFC 2365); beriem
+    /// z neho organization-local blok `239.192.0.0/16`. Stare `230.x` lezalo
+    /// v globalne smerovatelnom multicaste, cize v priestore, ktory siet
+    /// zakaznika nema pouzivat. Vedlajsi zisk: SSDP na `239.255.255.250` je
+    /// mimo bloku, takze sa mu vyhneme bez vynimky v kode.
+    IPAddress UdpServer::getMulticastIpforRegionPort(uint16_t region_port)
+    {
+      return IPAddress(239, 192, region_port >> 8, region_port & 0xFF);
     }
 
     IPAddress UdpServer::getMulticastIpforChannel(uint16_t channel)
@@ -702,6 +767,9 @@ namespace esphome
 
     void UdpServer::changeChannel(uint16_t channel)
     {
+      if (channel_ == channel && udp_channel_)
+        return;
+
       if ((channel_ != 0) && udp_channel_)
         udp_channel_->stop();
 
@@ -711,20 +779,50 @@ namespace esphome
         startMulticast(false);
     }
 
+    void UdpServer::changeLegacyChannel(uint16_t channel)
+    {
+      this->changeChannel(channel == 0 ? 0 : static_cast<uint16_t>(30100 + channel));
+    }
+
+    /// Prepocita sietovu vrstvu podla ulozeneho regionu.
+    ///
+    /// Toto je jedine miesto, ktore rozhoduje, ci sa hovori podla formatu 2
+    /// (`regionPort`) alebo este podla formatu 1 (stary kanal). Volajuci uz
+    /// ziadne cislo nepodava - inak by kazde volanie muselo vediet, v ktorom
+    /// formate kus prave je.
+    void UdpServer::applyRegionNetwork()
+    {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+      if (storage::store == nullptr || storage::store->region == nullptr)
+        return;
+      this->changeChannel(storage::store->region->activeRegionPort());
+#endif
+    }
+
     IPAddress UdpServer::getIp(bool main)
     {
+      // Spolocna adresa ostava zamerne na starom mieste.
+      //
+      // Prave cez nu si kus, ktory prave dostal novy firmvér a este nema
+      // regionPort, pyta konfiguraciu od svojho mastera - a ten moze byt v tej
+      // chvili este na formate 1. Keby sa presunula spolu s regionovymi
+      // adresami, obe generacie by o sebe pocas prechodu nevedeli, cize presne
+      // vtedy, ked sa potrebuju najst. Presunut sa da, az ked format 1 v teréne
+      // nezostane.
       if (main)
         return IPAddress(230, 0, 0, 1);
-      else
-        return getMulticastIpforChannel(channel_);
+      return getMulticastIpforRegionPort(channel_);
     }
 
     uint16_t UdpServer::getPort(bool main)
     {
+      // `channel_` uz nie je cislo kanala, ale priamo port miestnosti - a to aj
+      // pri formate 1, kde ho `activeRegionPort()` dopocita zo stareho kanala.
+      // Preto sa tu uz nic nescitava; scitanie bolo aj to, co pri 16-bitovom
+      // cisle pretekalo.
       if (main)
         return port_;
-      else
-        return port_ + channel_;
+      return channel_;
     }
 
     void UdpServer::startMulticast(bool main)
@@ -1027,6 +1125,9 @@ namespace esphome
           {
             this->applyRegionLayoutPacket(*packetRegionLayout);
           }
+          // ANNOUNCE sa zamerne neaplikuje. Je to oznam pre celu budovu, nie
+          // pokyn - prepisovat podla neho zlozenie by znamenalo, ze ktorykolvek
+          // master v dosahu prepise ktorykolvek kus, ktory ho pocuje.
           this->region_layout_callback_.call(*packetRegionLayout);
         }
         break;
