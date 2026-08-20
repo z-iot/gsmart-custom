@@ -49,6 +49,23 @@ namespace esphome
         fileName = SCHEDULE_SETTINGS_FILE;
       }
 
+      /// Zahodí celý kalendár a vypne plánovač.
+      ///
+      /// Servisná konverzia berie starý kus z cudzej inštalácie, takže jeho
+      /// týždenný plán je plán inej miestnosti. Samotné vymazanie regiónu ho
+      /// nechá v kuse ležať a po prvom pripojení na klientsku Wi-Fi začne
+      /// spínať podľa neho - preto sa maže spolu s regiónom.
+      ///
+      /// Vráti `true`, keď sa prázdny plán aj podarilo zapísať. Kus, ktorý
+      /// kalendár vôbec nemá kde držať, tento kód nikdy nezavolá - `schedule`
+      /// je celé pod `GSMART_FEATURE_SCHEDULE`.
+      bool clear()
+      {
+        this->enabled = false;
+        this->schedule.clear();
+        return this->saveToFile();
+      }
+
       void toJson(JsonObject &root) override
       {
         root["enabled"] = this->enabled;

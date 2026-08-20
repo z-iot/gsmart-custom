@@ -126,6 +126,9 @@ class ApiCoreV1 : public Component {
   void handle_factory_reset(JsonObject root, JsonObject response);
   void handle_service_ap(JsonObject root, JsonObject response);
   void handle_clear_region(JsonObject root, JsonObject response);
+  /// Zahodi tyzdenny kalendar. Chodi s `handle_clear_region`, aby stary plan
+  /// neprezil vymazanie regionu a nespinal kus podla cudzej miestnosti.
+  void clear_schedule_into(JsonObject response);
   void handle_clear_usage(JsonObject root, JsonObject response);
   bool handle_api_config(JsonObject root, JsonObject response);
   bool handle_api_manual_control(JsonObject root, JsonObject response);

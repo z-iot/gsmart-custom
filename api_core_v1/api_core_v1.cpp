@@ -1655,11 +1655,25 @@ void ApiCoreV1::handle_service_ap(JsonObject root, JsonObject response) {
   response["autoOffRemainingSec"] = mgr->get_service_ap_auto_off_remaining_sec();
 }
 
+/// Vymaze region, a na poziadanie s nim aj kalendar.
+///
+/// Kalendar chodi s regionom v jednom kroku zamerne. Servisna konverzia berie
+/// stary kus z cudzej instalacie a jeho tyzdenny plan je plan inej miestnosti -
+/// keby sa zmazal len region, kus by po prvom pripojeni na klientsku Wi-Fi
+/// zacal spinat podla cudzieho kalendara a nikto by nevedel preco. Jedno
+/// volanie preto, lebo cez hotspot je kazdy dalsi round trip dalsia sanca, ze
+/// technikovi vypadne spojenie medzi dvoma polovicami jednej operacie.
+///
+/// `scheduleSupported: false` znamena "tento kus kalendar nema" (rex nema
+/// filesystem), nie "nepodarilo sa" - volajuci to nesmie ukazat ako chybu.
 void ApiCoreV1::handle_clear_region(JsonObject root, JsonObject response) {
   if (!require_confirmation(root, response, "CLEAR_REGION"))
     return;
 
 #ifdef GSMART_FEATURE_REGION
+  // Stary klient pole neposiela a caka len vymazanie regionu.
+  const bool clear_schedule = json_bool(root["schedule"], false);
+
   if (storage::store == nullptr || storage::store->region == nullptr) {
     response["ok"] = false;
     response["error"] = "region_not_ready";
@@ -1675,10 +1689,37 @@ void ApiCoreV1::handle_clear_region(JsonObject root, JsonObject response) {
   response["ok"] = true;
   response["cleared"] = true;
   response["wifiPreserved"] = true;
+  if (clear_schedule)
+    this->clear_schedule_into(response);
 #else
   response["ok"] = false;
   response["error"] = "region_not_available";
   response["message"] = "Region feature is not enabled in this firmware.";
+#endif
+}
+
+/// Zahodi tyzdenny plan a povie do odpovede, ako to dopadlo.
+void ApiCoreV1::clear_schedule_into(JsonObject response) {
+#ifdef GSMART_FEATURE_SCHEDULE
+  if (storage::store == nullptr || storage::store->schedule == nullptr) {
+    response["scheduleSupported"] = false;
+    response["scheduleCleared"] = false;
+    return;
+  }
+
+  response["scheduleSupported"] = true;
+  const bool saved = storage::store->schedule->clear();
+  response["scheduleCleared"] = saved;
+  if (!saved) {
+    // Plan je uz prazdny v RAM, ale na disku ostal - po restarte by sa vratil.
+    // Tichy neuspech je tu to najhorsie, co sa da spravit.
+    response["ok"] = false;
+    response["error"] = "schedule_not_saved";
+    response["message"] = "The calendar was emptied in memory but could not be written to flash.";
+  }
+#else
+  response["scheduleSupported"] = false;
+  response["scheduleCleared"] = false;
 #endif
 }
 
