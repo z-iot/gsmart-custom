@@ -87,6 +87,19 @@ struct ScanRequest {
   bool identify{true};
 };
 
+/// One interface this device can sweep without a router: the network in host
+/// byte order, the prefix its own mask gives it, and whether that address sits
+/// on the service AP rather than on the client link.
+///
+/// The AP belongs on the list - a technician standing on it can still find the
+/// units around him - but it must never be handed to the app as the client
+/// subnet, which is what "the network I am on" means to everyone reading it.
+struct LocalSubnet {
+  uint32_t network{0};  ///< network address in host byte order
+  uint8_t prefix{24};
+  bool softap{false};
+};
+
 /// A single write aimed at one unit the scan found.
 struct TargetAction {
   uint32_t ip{0};
@@ -170,7 +183,11 @@ class LanScanComponent : public Component {
   /// Subnets this device can actually reach without a router: its station
   /// interface and, when it is up, its own soft AP. Anything else on the combo
   /// box would be a promise the device cannot keep.
-  static std::vector<std::pair<uint32_t, uint8_t>> local_subnets();
+  ///
+  /// Read from the interfaces themselves, never from Arduino's `WiFi`: ESPHome
+  /// drives the radio through esp_wifi, so that class never learns the unit is
+  /// online and answers every question about it with "not connected".
+  static std::vector<LocalSubnet> local_subnets();
 
   static bool parse_network(const std::string &value, uint32_t *network, uint8_t *prefix);
   static std::string ip_to_string(uint32_t ip);

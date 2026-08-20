@@ -1774,8 +1774,8 @@ bool resolve_scan_network(JsonObject root, uint32_t *network, uint8_t *prefix, s
     *error = "no_local_subnet";
     return false;
   }
-  *network = subnets.front().first;
-  *prefix = subnets.front().second;
+  *network = subnets.front().network;
+  *prefix = subnets.front().prefix;
   return true;
 }
 

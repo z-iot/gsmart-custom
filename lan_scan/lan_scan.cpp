@@ -9,8 +9,10 @@
 #include "esphome/components/ota_push/ota_push.h"
 #endif
 
-#include <WiFi.h>
+#include "esphome/components/wifi/wifi_component.h"
+
 #include <errno.h>
+#include <esp_netif.h>
 #include <fcntl.h>
 #include <lwip/etharp.h>
 #include <lwip/netif.h>
@@ -366,8 +368,8 @@ bool LanScanComponent::arp_lookup(uint32_t ip, uint8_t out[6]) {
   return ok;
 }
 
-std::vector<std::pair<uint32_t, uint8_t>> LanScanComponent::local_subnets() {
-  std::vector<std::pair<uint32_t, uint8_t>> out;
+std::vector<LocalSubnet> LanScanComponent::local_subnets() {
+  std::vector<LocalSubnet> out;
 
   auto prefix_from_mask = [](uint32_t mask) -> uint8_t {
     uint8_t bits = 0;
@@ -376,27 +378,41 @@ std::vector<std::pair<uint32_t, uint8_t>> LanScanComponent::local_subnets() {
     return bits;
   };
 
-  if (WiFi.isConnected()) {
-    const uint32_t ip = static_cast<uint32_t>(WiFi.localIP());
-    const uint32_t mask = static_cast<uint32_t>(WiFi.subnetMask());
-    if (ip != 0) {
-      // Arduino's IPAddress is little endian on the wire side; bring both into
-      // host order before masking or the network comes out reversed.
-      const uint32_t ip_host = ntohl(ip);
-      const uint32_t mask_host = ntohl(mask);
-      out.emplace_back(ip_host & mask_host, prefix_from_mask(mask_host));
-    }
-  }
+  // Straight from the interface, because Arduino's `WiFi` never sees this
+  // connection: ESPHome talks to esp_wifi itself, so `WiFi.isConnected()` stays
+  // false on a unit that is online and holding an address. Asking it cost the
+  // whole feature - every sweep was refused as `not_connected` and the app was
+  // offered no network at all - while `/info` on the same device reported the
+  // SSID and the IP it was answering from.
+  auto add = [&out, &prefix_from_mask](const char *if_key, bool softap) {
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey(if_key);
+    if (netif == nullptr || !esp_netif_is_netif_up(netif))
+      return;
 
-  const uint32_t ap_ip = static_cast<uint32_t>(WiFi.softAPIP());
-  if (ap_ip != 0) {
-    const uint32_t ap_host = ntohl(ap_ip);
-    const uint32_t network = ap_host & 0xFFFFFF00u;
-    const bool duplicate = std::any_of(out.begin(), out.end(),
-                                       [&](const std::pair<uint32_t, uint8_t> &item) { return item.first == network; });
-    if (!duplicate)
-      out.emplace_back(network, 24);
-  }
+    esp_netif_ip_info_t info{};
+    if (esp_netif_get_ip_info(netif, &info) != ESP_OK)
+      return;
+    if (info.ip.addr == 0 || info.netmask.addr == 0)
+      return;
+
+    // lwip keeps both in network order; mask in host order or the network comes
+    // out reversed.
+    const uint32_t ip_host = ntohl(info.ip.addr);
+    const uint32_t mask_host = ntohl(info.netmask.addr);
+    const uint32_t network = ip_host & mask_host;
+
+    const bool duplicate =
+        std::any_of(out.begin(), out.end(), [&](const LocalSubnet &item) { return item.network == network; });
+    if (duplicate)
+      return;
+
+    out.push_back(LocalSubnet{network, prefix_from_mask(mask_host), softap});
+  };
+
+  // Client link first: it is what "the network I am on" means, and what the app
+  // offers as the default.
+  add("WIFI_STA_DEF", false);
+  add("WIFI_AP_DEF", true);
 
   return out;
 }
@@ -412,7 +428,8 @@ void LanScanComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Page size: %u (max %u)", kDefaultLimit, kMaxResults);
   ESP_LOGCONFIG(TAG, "  Probes in flight: %u", kMaxInFlight);
   for (const auto &subnet : local_subnets())
-    ESP_LOGCONFIG(TAG, "  Reachable: %s/%u", ip_to_string(subnet.first).c_str(), subnet.second);
+    ESP_LOGCONFIG(TAG, "  Reachable: %s/%u%s", ip_to_string(subnet.network).c_str(), subnet.prefix,
+                  subnet.softap ? " (service AP)" : "");
 }
 
 void LanScanComponent::reset_() {
@@ -448,7 +465,10 @@ bool LanScanComponent::start(const ScanRequest &request, std::string *error) {
   }
 #endif
 
-  if (!WiFi.isConnected()) {
+  // "Is there an interface with an address on it" rather than "is the station
+  // link up": a technician standing on the service AP is on a segment too, and
+  // that is the case where this scan is worth the most.
+  if (local_subnets().empty()) {
     if (error != nullptr)
       *error = "not_connected";
     return false;
@@ -910,20 +930,41 @@ void LanScanComponent::build_networks(JsonObject root) const {
   JsonArray networks = root["networks"].to<JsonArray>();
 
   const auto subnets = local_subnets();
-  bool first = true;
+  bool default_taken = false;
   for (const auto &subnet : subnets) {
     JsonObject item = networks.add<JsonObject>();
-    item["network"] = ip_to_string(subnet.first);
-    item["prefix"] = subnet.second;
-    item["cidr"] = ip_to_string(subnet.first) + "/" + to_string(subnet.second);
-    item["source"] = first ? "sta" : "softap";
-    item["default"] = first;
-    first = false;
+    item["network"] = ip_to_string(subnet.network);
+    item["prefix"] = subnet.prefix;
+    item["cidr"] = ip_to_string(subnet.network) + "/" + to_string(subnet.prefix);
+    item["source"] = subnet.softap ? "softap" : "sta";
+    // The client subnet is the offer; the service AP is only ever the default
+    // when there is no client subnet to be had.
+    const bool is_default = !default_taken && (!subnet.softap || subnets.size() == 1);
+    item["default"] = is_default;
+    default_taken = default_taken || is_default;
   }
 
-  root["connected"] = WiFi.isConnected();
-  root["ip"] = WiFi.isConnected() ? std::string(WiFi.localIP().toString().c_str()) : std::string{};
-  root["ssid"] = WiFi.isConnected() ? std::string(WiFi.SSID().c_str()) : std::string{};
+  // The same source of truth the rest of the API answers from, so the tab and
+  // /info can never disagree about whether this unit is on a network.
+  const bool connected =
+      wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected();
+  root["connected"] = connected;
+
+  std::string ip;
+  std::string ssid;
+  if (connected) {
+    char ip_buf[network::IP_ADDRESS_BUFFER_SIZE];
+    for (const auto &address : wifi::global_wifi_component->wifi_sta_ip_addresses()) {
+      if (address.is_set()) {
+        ip = address.str_to(ip_buf);
+        break;
+      }
+    }
+    char ssid_buf[wifi::SSID_BUFFER_SIZE];
+    ssid = wifi::global_wifi_component->wifi_ssid_to(ssid_buf);
+  }
+  root["ip"] = ip;
+  root["ssid"] = ssid;
 }
 
 void LanScanComponent::build_action(JsonObject root) const {

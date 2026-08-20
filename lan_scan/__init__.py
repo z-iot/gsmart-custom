@@ -3,7 +3,9 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@grid"]
-DEPENDENCIES = ["network"]
+# `wifi` je tu preto, že sken číta stav linky z toho istého miesta ako zvyšok
+# API (`wifi::global_wifi_component`), nie z Arduino WiFi triedy.
+DEPENDENCIES = ["network", "wifi"]
 AUTO_LOAD = ["json"]
 
 lan_scan_ns = cg.esphome_ns.namespace("lan_scan")
