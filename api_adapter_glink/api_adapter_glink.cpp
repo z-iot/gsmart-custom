@@ -506,6 +506,25 @@ std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, Json
     const bool saved = this->core_->apply_settings_consumables(body);
     response["ok"] = true;
     response["saved"] = saved;
+  } else if (name == "g-node.lan.networks.get") {
+    this->core_->build_lan_networks(response);
+  } else if (name == "g-node.lan.scan.start.set") {
+    this->core_->handle_lan_scan_start(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "lan_scan_start_failed");
+  } else if (name == "g-node.lan.scan.get") {
+    this->core_->build_lan_scan(response);
+  } else if (name == "g-node.lan.scan.stop.set") {
+    this->core_->handle_lan_scan_stop(body, response);
+  } else if (name == "g-node.lan.target.command.set") {
+    // The destructive exclusion below is about this device wiping itself from
+    // the cloud. Aiming the same reset at a neighbour is the entire point of the
+    // service tab, and it is gated on the app side by role, not here.
+    this->core_->handle_lan_target_command(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "lan_target_command_failed");
+  } else if (name == "g-node.lan.target.result.get") {
+    this->core_->build_lan_action(response);
   } else if (name == "g-node.control.factory_reset.set" || name == "g-node.control.clear_region.set" ||
              name == "g-node.control.clear_usage.set") {
     response["ok"] = false;

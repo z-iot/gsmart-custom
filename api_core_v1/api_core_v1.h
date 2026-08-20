@@ -130,6 +130,23 @@ class ApiCoreV1 : public Component {
   /// neprezil vymazanie regionu a nespinal kus podla cudzej miestnosti.
   void clear_schedule_into(JsonObject response);
   void handle_clear_usage(JsonObject root, JsonObject response);
+
+  // LAN scan - "who else is on my segment". Only emitter builds carry it: the
+  // relay needs `ota_push` for a find to be worth anything, and a rex has
+  // neither that nor the heap for a sweep.
+
+  /// Which subnets this device can reach without a router. The app's network
+  /// picker is filled from here rather than from a guess, because a device
+  /// cannot scan a segment it has no address on.
+  void build_lan_networks(JsonObject root);
+  void handle_lan_scan_start(JsonObject root, JsonObject response);
+  void handle_lan_scan_stop(JsonObject root, JsonObject response);
+  /// The running (or last) sweep, results included. Polled rather than pushed:
+  /// a sweep outlives any command timeout the cloud is willing to hold open.
+  void build_lan_scan(JsonObject root);
+  void handle_lan_target_command(JsonObject root, JsonObject response);
+  void build_lan_action(JsonObject root);
+
   bool handle_api_config(JsonObject root, JsonObject response);
   bool handle_api_manual_control(JsonObject root, JsonObject response);
 

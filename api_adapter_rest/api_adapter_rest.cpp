@@ -126,6 +126,28 @@ void ApiAdapterRest::setup() {
       send_json(request, [this, root](JsonObject res) { this->core_->handle_region_ping(root, res); });
     });
 
+    // LAN scan - the same surface the cloud command uses, reachable straight off
+    // the service AP when a technician is standing next to the unit and there is
+    // no cloud in range.
+    web_server_base::on(server, (base_path + "/lan/networks").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_lan_networks(root); });
+    });
+    web_server_base::on(server, (base_path + "/lan/scan").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_lan_scan(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/lan/scan").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_lan_scan_start(root, res); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/lan/scan/stop").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_lan_scan_stop(root, res); });
+    });
+    web_server_base::on(server, (base_path + "/lan/target").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
+      send_json(request, [this](JsonObject root) { this->core_->build_lan_action(root); });
+    });
+    web_server_base::on_post_json(server, (base_path + "/lan/target").c_str(), [this](AsyncWebServerRequest *request, JsonObject root) {
+      send_json(request, [this, root](JsonObject res) { this->core_->handle_lan_target_command(root, res); });
+    });
+
     // Settings: Consumables (lamp hours, power, etc.)
     web_server_base::on(server, (base_path + "/settings/consumables").c_str(), HTTP_GET, [this](AsyncWebServerRequest *request) {
       send_json(request, [this](JsonObject root) { this->core_->build_settings_consumables(root); });

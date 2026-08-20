@@ -25,6 +25,10 @@
 #include "esphome/components/ota_push/ota_push.h"
 #endif
 
+#ifdef USE_GSMART_LAN_SCAN
+#include "esphome/components/lan_scan/lan_scan.h"
+#endif
+
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
 #endif
@@ -1742,6 +1746,192 @@ void ApiCoreV1::handle_clear_usage(JsonObject root, JsonObject response) {
   response["ok"] = false;
   response["error"] = "usage_not_available";
   response["message"] = "Usage feature is not enabled in this firmware.";
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// LAN scan
+// ---------------------------------------------------------------------------
+
+#ifdef USE_GSMART_LAN_SCAN
+namespace {
+
+/// Turns whatever the caller sent into a network this device can actually
+/// sweep. An empty request means "the one I am on", which is what the app asks
+/// for by default and the only answer that is right without a router.
+bool resolve_scan_network(JsonObject root, uint32_t *network, uint8_t *prefix, std::string *error) {
+  const std::string requested = json_string(root["network"]);
+  if (!requested.empty()) {
+    if (!lan_scan::LanScanComponent::parse_network(requested, network, prefix)) {
+      *error = "invalid_network";
+      return false;
+    }
+    return true;
+  }
+
+  const auto subnets = lan_scan::LanScanComponent::local_subnets();
+  if (subnets.empty()) {
+    *error = "no_local_subnet";
+    return false;
+  }
+  *network = subnets.front().first;
+  *prefix = subnets.front().second;
+  return true;
+}
+
+}  // namespace
+#endif
+
+void ApiCoreV1::build_lan_networks(JsonObject root) {
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    root["ok"] = false;
+    root["error"] = "lan_scan_not_ready";
+    return;
+  }
+  root["ok"] = true;
+  lan_scan::global_lan_scan->build_networks(root);
+#else
+  root["ok"] = false;
+  root["error"] = "lan_scan_not_available";
+  root["message"] = "This firmware was built without the LAN scan component.";
+  root["networks"].to<JsonArray>();
+#endif
+}
+
+void ApiCoreV1::handle_lan_scan_start(JsonObject root, JsonObject response) {
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    response["ok"] = false;
+    response["error"] = "lan_scan_not_ready";
+    return;
+  }
+
+  lan_scan::ScanRequest request;
+  std::string error;
+  if (!resolve_scan_network(root, &request.network, &request.prefix, &error)) {
+    response["ok"] = false;
+    response["error"] = error;
+    return;
+  }
+
+  if (!root["fromHost"].isNull())
+    request.from_host = static_cast<uint8_t>(root["fromHost"].as<int>());
+  if (!root["toHost"].isNull())
+    request.to_host = static_cast<uint8_t>(root["toHost"].as<int>());
+  if (!root["limit"].isNull())
+    request.limit = static_cast<uint8_t>(root["limit"].as<int>());
+  if (!root["identify"].isNull())
+    request.identify = root["identify"].as<bool>();
+
+  if (!lan_scan::global_lan_scan->start(request, &error)) {
+    response["ok"] = false;
+    response["error"] = error;
+    lan_scan::global_lan_scan->build_status(response);
+    return;
+  }
+
+  response["ok"] = true;
+  response["accepted"] = true;
+  lan_scan::global_lan_scan->build_status(response);
+#else
+  (void) root;
+  response["ok"] = false;
+  response["error"] = "lan_scan_not_available";
+  response["message"] = "This firmware was built without the LAN scan component.";
+#endif
+}
+
+void ApiCoreV1::handle_lan_scan_stop(JsonObject root, JsonObject response) {
+  (void) root;
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    response["ok"] = false;
+    response["error"] = "lan_scan_not_ready";
+    return;
+  }
+  lan_scan::global_lan_scan->stop();
+  response["ok"] = true;
+  lan_scan::global_lan_scan->build_status(response);
+#else
+  response["ok"] = false;
+  response["error"] = "lan_scan_not_available";
+#endif
+}
+
+void ApiCoreV1::build_lan_scan(JsonObject root) {
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    root["ok"] = false;
+    root["error"] = "lan_scan_not_ready";
+    return;
+  }
+  root["ok"] = true;
+  lan_scan::global_lan_scan->build_status(root);
+#else
+  root["ok"] = false;
+  root["error"] = "lan_scan_not_available";
+  root["state"] = "idle";
+  root["devices"].to<JsonArray>();
+#endif
+}
+
+void ApiCoreV1::handle_lan_target_command(JsonObject root, JsonObject response) {
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    response["ok"] = false;
+    response["error"] = "lan_scan_not_ready";
+    return;
+  }
+
+  lan_scan::TargetAction action;
+  action.action = json_string(root["action"]);
+
+  const std::string ip = json_string(root["ip"]);
+  uint32_t parsed_ip = 0;
+  uint8_t parsed_prefix = 32;
+  if (!lan_scan::LanScanComponent::parse_network(ip + "/32", &parsed_ip, &parsed_prefix)) {
+    response["ok"] = false;
+    response["error"] = "invalid_target_ip";
+    return;
+  }
+  action.ip = parsed_ip;
+
+  // The body rides through untouched: it is whatever the target's own endpoint
+  // documents, so `wifi.set` sends the same object the Network tab already
+  // sends to a device directly.
+  JsonVariantConst body = root["body"];
+  if (!body.isNull())
+    serializeJson(body, action.body);
+
+  std::string error;
+  if (!lan_scan::global_lan_scan->start_action(action, &error)) {
+    response["ok"] = false;
+    response["error"] = error;
+    return;
+  }
+
+  response["ok"] = true;
+  response["accepted"] = true;
+  lan_scan::global_lan_scan->build_action(response);
+#else
+  (void) root;
+  response["ok"] = false;
+  response["error"] = "lan_scan_not_available";
+#endif
+}
+
+void ApiCoreV1::build_lan_action(JsonObject root) {
+#ifdef USE_GSMART_LAN_SCAN
+  if (lan_scan::global_lan_scan == nullptr) {
+    root["ok"] = false;
+    root["error"] = "lan_scan_not_ready";
+    return;
+  }
+  lan_scan::global_lan_scan->build_action(root);
+#else
+  root["ok"] = false;
+  root["error"] = "lan_scan_not_available";
 #endif
 }
 
