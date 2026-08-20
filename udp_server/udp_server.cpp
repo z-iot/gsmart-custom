@@ -517,26 +517,32 @@ namespace esphome
 #endif
     }
 
+    /// Vypyta si zlozenie svojej miestnosti - alebo sa spyta, ci nejaku ma.
+    ///
+    /// Podmienka `isRegionActive()` tu bola dovtedy, kym kus o miestnost nemohol
+    /// prist inak nez prikazom. Odkedy zahadzuje zaznam formatu 1, je prazdny
+    /// kus bezny stav po nahrati firmveru - a prave ten sa musi vediet spytat.
+    /// Master odpovie len tomu, koho ma vo svojej clenskej tabulke.
     void UdpServer::sendRegionLayoutRequest()
     {
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
-      if (storage::store == nullptr || storage::store->region == nullptr || !storage::store->region->isRegionActive())
+      if (storage::store == nullptr || storage::store->region == nullptr || storage::store->region->isMaster())
         return;
       PacketRegionLayout packet = fillRegionLayout(RegionLayoutAction::REQUEST);
 
-      // Kus, ktory nebezi na aktualnom formate, nema kde inde pytat: port svojej
-      // miestnosti este nepozna a stary kanal uz nemusi nikto pocuvat. Spolocna
-      // adresa je jedine miesto, kde je master isto k zastihnutiu.
-      if (!storage::store->region->usesRegionFormat2())
-      {
-        sendRegionLayout(packet, true);
-        return;
-      }
-
+      // Na port svojej miestnosti, ked uz nejaky ma.
       if (channel_ != 0)
         sendRegionLayout(packet, false);
-      if (channel_ == 0 || !storage::store->region->hasMembers())
-        sendRegionLayout(packet, true);
+
+      // A vzdy aj na spolocnu adresu.
+      //
+      // Odkedy sa kus pri starte preformatuje sam, drzi port dopocitany zo
+      // stareho kanala - a ten nemusi byt ten, ktory miestnosti medzitym pridelil
+      // cloud. Kus, ktory bol prave pri tej zmene offline, by sa pytal na porte,
+      // kde uz nikto nie je, a nemal by sa ako vratit. Spolocna adresa je jedine
+      // miesto, kde je master isto k zastihnutiu; jeden paket navyse pri
+      // pripojeni je za to lacna cena.
+      sendRegionLayout(packet, true);
 #endif
     }
 
@@ -895,8 +901,7 @@ namespace esphome
         startMulticast(false);
 
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
-      if (storage::store != nullptr && storage::store->region != nullptr &&
-          storage::store->region->isRegionActive() && !storage::store->region->isMaster())
+      if (storage::store != nullptr && storage::store->region != nullptr && !storage::store->region->isMaster())
       {
         this->set_timeout("region_layout_request", 1500, [this]()
                           { this->sendRegionLayoutRequest(); });
@@ -1110,9 +1115,14 @@ namespace esphome
           if (packetRegionLayout->action == RegionLayoutAction::REQUEST)
           {
 #if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+            // `region_id == 0` je kus, ktory ziadnu miestnost nema - po zahodeni
+            // zaznamu formatu 1 je to prave ten, kvoli ktoremu to cele je.
+            // Odpoveda sa mu z rovnakeho dovodu ako clenovi: je v clenskej
+            // tabulke tohto mastera, cize do tejto miestnosti patri.
             if (storage::store != nullptr && storage::store->region != nullptr &&
                 storage::store->region->isMaster() &&
-                packetRegionLayout->region_id == storage::store->region->layout.serial &&
+                (packetRegionLayout->region_id == storage::store->region->layout.serial ||
+                 packetRegionLayout->region_id == 0) &&
                 storage::store->region->isMemberMac(packetRegionLayout->mac))
             {
               PacketRegionLayout response = fillRegionLayout(RegionLayoutAction::RESPONSE);

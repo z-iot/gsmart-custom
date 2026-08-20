@@ -34,14 +34,32 @@ namespace esphome
     /// 230.x, verzia ako 32-bit pecialka. Format 2 nesie regionPort, ktory je
     /// zaroven identita aj UDP port, adresu v 239.192.0.0/16 a 16-bitovu verziu.
     ///
-    /// Kus, ktory najde ulozeny iny format, nesmie svojmu zaznamu verit -
-    /// vypyta si novy (master z cloudu, clen od mastera na spolocnej adrese).
+    /// Tento firmvér drzi len format 2. Zaznam, ktory nim nie je, sa zahadzuje
+    /// - pri starte aj pri zapise. Kus potom stoji ako single: bez miestnosti,
+    /// bez cisla, bez clenov, a caka, kym ho jeho master alebo cloud prevezme
+    /// nanovo. Prekladat medzi formatmi sa neoplatilo: kazdy taky preklad bol
+    /// tvrdenie o stave, ktory nikto neoveril.
     static constexpr uint8_t kRegionFormat = 2;
 
     /// Rozsah portov, z ktoreho cloud prideluje regionPort. Firmvér ho
     /// nevynucuje, len sa podla neho rozhoduje, ci je hodnota vobec pouzitelna.
     static constexpr uint16_t kRegionPortMin = 30101;
     static constexpr uint16_t kRegionPortMax = 49151;
+
+    /// Zaklad, na ktorom stal stary kanal.
+    ///
+    /// Format 1 hovoril na `30100 + kanal` a novy firmvér na tom cisle nic
+    /// nezmenil - `activeRegionPort()` ho dopocitaval rovnako. Preto sa z neho
+    /// da spravit `regionPort` bez toho, aby sa miestnost pohla: je to ten isty
+    /// port aj ta ista skupina, na ktorej uz je. Cloud ho neskor moze prepisat
+    /// na svoj pridelovany - vtedy sa miestnost presunie cela naraz.
+    static constexpr uint16_t kLegacyPortBase = 30100;
+
+    /// Port stareho kanala. `0`, ked ziadny kanal ulozeny nie je.
+    inline uint16_t regionPortFromLegacyChannel(uint16_t channel)
+    {
+      return channel == 0 ? 0 : static_cast<uint16_t>(kLegacyPortBase + channel);
+    }
 
     struct RegionMetadata
     {
@@ -139,10 +157,19 @@ namespace esphome
           this->metadata.regionPort = root["regionPort"].as<uint16_t>();
         if (!root["regionVersion"].isNull())
           this->metadata.regionVersion = clampRegionVersion(root["regionVersion"].as<uint32_t>());
-        // Format prijima len ten, kto ho posle. Zapis bez neho je zapis podla
-        // stareho protokolu a nesmie sa tvarit, ze kus uz presiel.
+        // Format sa uz len zvysuje, nikdy neklesa.
+        //
+        // Cloud posiela `regionFormat: 1` dovtedy, kym o kazdom clenovi miestnosti
+        // nevie, ze ma novy firmvér - a kus, ktory sa pri starte preformatoval, by
+        // sa kazdym takym zapisom vratil spat. Port si zo zapisu vezme, ten vlastni
+        // cloud a je to jedine cislo, ktore rozhoduje, kde sa miestnost stretne.
+        // Format nie. Zapis bez formatu, ale s portom, je zapis formatu 2.
         if (!root["regionFormat"].isNull())
-          this->metadata.format = root["regionFormat"].as<uint8_t>();
+        {
+          const uint8_t incomingFormat = root["regionFormat"].as<uint8_t>();
+          if (incomingFormat > this->metadata.format)
+            this->metadata.format = incomingFormat;
+        }
         else if (!root["regionPort"].isNull())
           this->metadata.format = kRegionFormat;
       }
@@ -166,9 +193,7 @@ namespace esphome
       {
         if (this->usesRegionFormat2())
           return this->metadata.regionPort;
-        if (this->metadata.legacyChannel != 0)
-          return static_cast<uint16_t>(30100 + this->metadata.legacyChannel);
-        return 0;
+        return regionPortFromLegacyChannel(this->metadata.legacyChannel);
       }
 
       void recalculateLayout()
@@ -290,7 +315,7 @@ namespace esphome
       void setup();
       void save();
       void saveMetadata();
-      void adoptLegacyMetadata();
+      void discardPreFormat2Region();
       void clear();
 
       RegionLayout layout;

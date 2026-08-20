@@ -977,6 +977,22 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     storage::store->region->clear();
   }
 
+  // Zapis, ktory nie je vo formate 2, sa nedrzi.
+  //
+  // Pri starte by taky zaznam aj tak skoncil zahodeny, takze ho tento firmvér
+  // neberie uz teraz a povie to nahlas - inak by miestnost jednu noc fungovala
+  // a po prvom reste zmizla, co je presne ten druh tichej odchylky, kvoli
+  // ktorej sa to cele prerabalo. Cloud posiela jednotku uz len miestnosti bez
+  // prideleneho portu; to je stav, ktory patri do logu a do read-backu.
+  const bool region_format_rejected = !detached && !storage::store->region->usesRegionFormat2();
+  if (region_format_rejected) {
+    ESP_LOGE(TAG,
+             "Region write is format %u with port %u; this firmware keeps only format %u. Discarding the region.",
+             storage::store->region->metadata.format, storage::store->region->metadata.regionPort,
+             storage::kRegionFormat);
+    storage::store->region->clear();
+  }
+
   storage::store->region->bumpConfigVersion();
   storage::store->region->save();
 
@@ -995,7 +1011,7 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     udp_server::udpServer->sendReconfig(udp_server::PacketReconfig{});
   }
 #endif
-  return true;
+  return !region_format_rejected;
 #endif
   return false;
 }
