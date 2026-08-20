@@ -266,12 +266,15 @@ namespace esphome
         return this->layout.memberCount > 0;
       }
 
-      /// Zvysenie verzie po lokalnom zapise.
+      /// Zvysenie verzie po zapise, ktory ziadnu nepriniesol.
       ///
-      /// Verziu vlastni cloud; toto je len poistka pre zapis, ktory prisiel bez
-      /// nej (stara appka, servisny zasah po LAN-e). Na strope sa zastavi -
-      /// pretocit ju na nulu by znamenalo, ze kazdy dalsi push bude vyzerat
-      /// starsie nez to, co uz kus ma, a miestnost by sa prestala aktualizovat.
+      /// Verziu vlastni ten, kto zapisuje - cloud aj appka ju posielaju
+      /// v zapise, a vtedy sa berie presne to, co prislo (`apply_region`).
+      /// Toto je poistka pre pisatela, ktory ju neposle (stara appka, servisny
+      /// zasah po LAN-e): zmena obsahu sa nesmie schovat za nezmenene cislo.
+      /// Na strope sa zastavi - pretocit ju na nulu by znamenalo, ze kazdy
+      /// dalsi push bude vyzerat starsie nez to, co uz kus ma, a miestnost by
+      /// sa prestala aktualizovat.
       void bumpConfigVersion()
       {
         if (this->metadata.regionVersion == 0xFFFF)

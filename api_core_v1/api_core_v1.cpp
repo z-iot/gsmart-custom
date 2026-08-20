@@ -997,7 +997,27 @@ bool ApiCoreV1::apply_region(JsonObject root) {
     storage::store->region->clear();
   }
 
-  storage::store->region->bumpConfigVersion();
+  // Verziu vlastni ten, kto zapisuje. Kus si ju nezvysuje.
+  //
+  // Bumpovalo sa tu po **kazdom** zapise, takze kus, do ktoreho cloud prave
+  // zapisal v2, hlasil v3. Verzia je pritom pocitadlo zmien miestnosti a slusi
+  // presne na jedno: rovnake cislo na oboch stranach znamena rovnaky obsah
+  // a niet co dosynchronizovavat. Cislo, ktore si kus sam posunie, to uz
+  // netvrdi - obe strany potom musia obchadzat vlastnu odpoved (appka
+  // porovnava `>=`, cloudovy audit hlasil „verzia 3 namiesto 2" pri kazdom
+  // dokoncenom zapise). Navyse to cislo neostava v kuse: master ho rozposle
+  // clenom v layout push-i, takze sa nafukovala verzia celej miestnosti.
+  //
+  // Zapis, ktory verziu nenesie (stara appka, servisny zasah po LAN-e), ju
+  // stale dostane zdvihnutu - inak by sa zmena obsahu schovala za nezmenene
+  // cislo a miestnost by sa prestala aktualizovat. Zapis, ktory ju nesie, sa
+  // uklada presne tak, ako prisiel.
+  const bool version_sent = !root["configVersion"].isNull() || !root["regionVersion"].isNull();
+  // Kus bez miestnosti nema co pocitat. `clear()` verziu vynuluje a zdvihnut ju
+  // hned spat na jednotku by z prazdneho zaznamu spravilo zaznam s historiou.
+  const bool keeps_region = !detached && !region_format_rejected;
+  if (!version_sent && keeps_region)
+    storage::store->region->bumpConfigVersion();
   storage::store->region->save();
 
 #ifdef USE_UDPSERVER
