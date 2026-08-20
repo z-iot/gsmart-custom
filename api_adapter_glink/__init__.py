@@ -1,8 +1,13 @@
+import logging
+from pathlib import Path
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_URL
 from esphome.core import CORE
 from ..api_core_v1 import ApiCoreV1
+
+_LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@max-iot"]
 DEPENDENCIES = ["api_core_v1", "wifi"]
@@ -59,4 +64,33 @@ async def to_code(config):
     cg.add(var.set_tls_ca_cert(config[CONF_TLS_CA_CERT]))
     cg.add(var.set_heartbeat_interval(config[CONF_HEARTBEAT_INTERVAL].total_milliseconds))
     cg.add(var.set_full_heartbeat_interval(config[CONF_FULL_HEARTBEAT_INTERVAL].total_milliseconds))
-    cg.add_library("links2004/WebSockets", "2.7.2")
+    add_websockets_library()
+
+
+def add_websockets_library():
+    """Declare the WebSockets dependency - vendored on the ESP8266, from the registry elsewhere.
+
+    A REX has to build the library without its TLS half or BearSSL eats 100 kB of a 1 MB flash for
+    a wss:// path validate_ws_url() refuses anyway, and there is no way to ask the registry copy for
+    that. `components/websockets-override/` is the same 2.7.2 release with three marked hunks; its
+    README carries the numbers. Keep both arms on the same version.
+
+    The override lives in the firmware repository rather than in this submodule, so a checkout used
+    on its own still builds - it just builds the registry copy and a REX image too big to OTA. Say
+    so rather than let that be discovered from a size.
+    """
+    if not CORE.is_esp8266:
+        cg.add_library("links2004/WebSockets", "2.7.2")
+        return
+
+    override = Path(CORE.relative_config_path("components/websockets-override"))
+    if not (override / "library.json").is_file():
+        _LOGGER.warning(
+            "components/websockets-override is missing; building the ESP8266 against the registry "
+            "WebSockets. That links BearSSL, which no REX can use, and the image grows by about "
+            "100 kB - past the point where it still fits through OTA."
+        )
+        cg.add_library("links2004/WebSockets", "2.7.2")
+        return
+
+    cg.add_library("WebSockets", None, f"symlink://{override.resolve().as_posix()}")

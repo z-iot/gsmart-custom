@@ -241,6 +241,7 @@ void ApiAdapterGLink::connect_() {
 
   ESP_LOGI(TAG, "Connecting to G-Link %s%s:%u%s", this->parsed_.secure ? "wss://" : "ws://", this->parsed_.host.c_str(),
            this->parsed_.port, this->parsed_.path.c_str());
+#ifdef HAS_SSL
   if (this->parsed_.secure) {
     if (!this->tls_ca_cert_.empty()) {
       this->websocket_.beginSslWithCA(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str(),
@@ -252,6 +253,22 @@ void ApiAdapterGLink::connect_() {
   } else {
     this->websocket_.begin(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
   }
+#else
+  // A build without HAS_SSL has no TLS at all - see GSMART_WS_NO_TLS in the vendored WebSockets
+  // library. Only the REX is built that way, and validate_ws_url() already refuses a wss:// url on
+  // the ESP8266 at config time, so parsed_.secure cannot be true here. Assert it rather than dial
+  // plaintext at a TLS port, which would hang on a handshake that never comes.
+  if (this->parsed_.secure) {
+    ESP_LOGE(TAG, "wss:// url on a build without TLS; refusing to connect");
+    this->set_state_("stopped");
+    this->set_error_("wss_not_supported");
+    // started_ stays false, so loop() comes straight back here. Back off like every other failure
+    // path or this spins the gateway probe on every tick for a url that will never work.
+    this->next_connect_ms_ = millis() + this->reconnect_interval_ms_;
+    return;
+  }
+  this->websocket_.begin(this->parsed_.host.c_str(), this->parsed_.port, this->parsed_.path.c_str());
+#endif
   this->started_ = true;
   this->connect_started_ms_ = millis();
 }
