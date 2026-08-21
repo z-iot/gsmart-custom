@@ -444,6 +444,12 @@ void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payl
   if (error.empty() && name == "g-node.control.restart.set") {
     this->send_session_event_("ending", "restart_requested", true);
   }
+  // A factory reset takes the Wi-Fi with it, so this session does not just pause
+  // - it ends, and nothing follows from this unit until somebody stands next to
+  // it. Saying so is what keeps the cloud from reading the silence as a dropout.
+  if (error.empty() && name == "g-node.control.factory_reset.set") {
+    this->send_session_event_("ending", "factory_reset_requested", true);
+  }
 }
 
 std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, JsonObject body, JsonObject response) {
@@ -542,12 +548,32 @@ std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, Json
       return json_error(response, "lan_target_command_failed");
   } else if (name == "g-node.lan.target.result.get") {
     this->core_->build_lan_action(response);
-  } else if (name == "g-node.control.factory_reset.set" || name == "g-node.control.clear_region.set" ||
-             name == "g-node.control.clear_usage.set") {
-    response["ok"] = false;
-    response["message"] = "destructive command is excluded from G-Link firmware slice";
-    response["command"] = name;
-    return "unsupported";
+  } else if (name == "g-node.control.factory_reset.set") {
+    // Carried over G-Link since 2026-08-21. The exclusion that stood here cost
+    // more than it saved: the same reset aimed at a *neighbour* always went
+    // through as `g-node.lan.target.command.set`, so the block only closed the
+    // honest path, and a fleet that can be cleared one piece at a time is
+    // cleared by driving to it. What guards it is the confirmation token in the
+    // body - `require_confirmation` refuses a frame without it - and the caller
+    // check G-Board does before the frame ever gets here.
+    //
+    // The unit forgets its Wi-Fi with everything else, so this response is the
+    // last thing the cloud hears from it: the session event below is sent while
+    // the answer is still on its way out, ahead of the 750 ms reboot.
+    this->core_->handle_factory_reset(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "factory_reset_failed");
+  } else if (name == "g-node.control.clear_region.set") {
+    // `schedule: true` in the body takes the weekly plan with the region. They
+    // belong together: a unit that lost its room but kept the plan switches on
+    // a schedule nobody sets for it any more.
+    this->core_->handle_clear_region(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "clear_region_failed");
+  } else if (name == "g-node.control.clear_usage.set") {
+    this->core_->handle_clear_usage(body, response);
+    if (!response["ok"].as<bool>())
+      return json_error(response, "clear_usage_failed");
   } else if (name.rfind("g-node.", 0) == 0) {
     response["ok"] = false;
     response["message"] = "unsupported G-Node command";
