@@ -1233,6 +1233,10 @@ void ApiCoreV1::handle_identify(JsonObject root, JsonObject response) {
     identify.duration_sec = root["duration"].as<uint32_t>();
   if (identify.duration_sec == 0)
     identify.duration_sec = 3;
+  // Nothing ever cancels an identify - it runs itself out. The ceiling is here so a
+  // typo in `durationSec` cannot leave a unit beeping and flashing an hour later.
+  if (identify.duration_sec > 30)
+    identify.duration_sec = 30;
 
   bool matches = true;
   if (!identify.target_mac.empty()) {
