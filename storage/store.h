@@ -211,18 +211,18 @@ namespace esphome
           // AP
           res += "A";
 
-#ifdef GSMART_FEATURE_REGION        
-        // if (this->region->isRegionActive())
-        // {
-        //   if (this->region->isMaster())
-        //     res += "M";
-        //   else
-        //     res += "S";
-        // }
-        // else
-        // {
-        //   res += "";
-        // };
+#ifdef GSMART_FEATURE_REGION
+        // Ci je kus master alebo len clen miestnosti sa na displeji doteraz
+        // nedalo zistit vobec. Nazov miestnosti uz nesie hlavna stranka, tu
+        // ostava rola - pri "master nema kopiu" je to prva vec, na ktoru sa
+        // clovek pri kuse pozrie.
+        if (this->region != nullptr && this->region->isRegionActive())
+        {
+          if (this->region->isMaster())
+            res += "M";
+          else
+            res += "S";
+        }
 #endif        
         if (this->global->situation.CurrentIsActive)
         {
