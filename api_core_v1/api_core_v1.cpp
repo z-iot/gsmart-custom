@@ -611,6 +611,30 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
   add_error_status(root);
 }
 
+/// Kolko sa svietilo a kolkokrat - bez pola kanalov.
+///
+/// Cloud tieto cisla nema odkial vziat: `Device.consumable` je zaseknuta
+/// predvolena hodnota, ktoru nikto neaktualizuje. Preto ich kus prikladá ku
+/// kazdemu ukonceniu ziarenia a ku kazdemu plnemu heartbeatu - vtedy sa jedine
+/// menia. `build_consumption` hovori to iste aj s polom kanalov, ale to je
+/// odpoved na dotaz; do udalosti, ktora leti kazdych par minut, sa pole
+/// nevojde zadarmo.
+void ApiCoreV1::build_usage_summary(JsonObject root) {
+#if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
+  if (storage::store == nullptr || storage::store->usage == nullptr) return;
+  auto &beam = storage::store->usage->beam.pref;
+  root["lampCount"] = beam.lampCount;
+  root["onSec"] = beam.onSec;
+  root["startCount"] = beam.startCount;
+  root["stopCount"] = beam.stopCount;
+  root["uptimeSec"] = millis() / 1000;
+#else
+  // Spinac trubicu nema. Prazdny objekt by sa v cloude cital ako "nula hodin",
+  // co vyzera ako nova trubica; `enabled:false` povie, ze taka vec tu nie je.
+  root["enabled"] = false;
+#endif
+}
+
 void ApiCoreV1::build_consumption(JsonObject root) {
 #if defined(GSMART_FEATURE_USAGE) && defined(GSMART_EMITTER)
   storage::store->usage->fillAdvertise(root);

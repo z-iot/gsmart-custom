@@ -96,6 +96,9 @@ class ApiCoreV1 : public Component {
 
   // Settings
   void build_settings_consumables(JsonObject root);
+  // Kompaktny sucet prevadzky - kolko sa svietilo a kolkokrat. `build_consumption`
+  // hovori to iste aj s poliom kanalov; to je na dotaz, nie do kazdej udalosti.
+  void build_usage_summary(JsonObject root);
   bool apply_settings_consumables(JsonObject root);
   void build_settings_modes(JsonObject root);
   bool apply_settings_modes(JsonObject root);

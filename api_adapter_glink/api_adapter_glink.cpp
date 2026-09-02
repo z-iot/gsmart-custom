@@ -668,6 +668,14 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
     body["source"] = storage::radiationSourceToApi(source);
     body["serial"] = this->device_serial_();
     body["uptimeSec"] = millis() / 1000;
+    // Odsvietene hodiny sa menia prave tu - inde stoja. Cloud si ich nema odkial
+    // vypytat inak nez dotazom na kazdy kus zvlast, takze ich kus prilozi sam,
+    // v okamihu, ked su cerstve. Pri zapnuti sa neposielaju: vtedy je to este
+    // to iste cislo ako pri poslednom vypnuti.
+    if (!active) {
+      this->core_->build_settings_consumables(body["consumables"].to<JsonObject>());
+      this->core_->build_usage_summary(body["usage"].to<JsonObject>());
+    }
   });
 }
 
@@ -695,6 +703,11 @@ void ApiAdapterGLink::build_full_status_(JsonObject body) {
   this->core_->build_status(status);
   JsonObject consumables = body["consumables"].to<JsonObject>();
   this->core_->build_settings_consumables(consumables);
+  // Sucty prevadzky chodia s konzumablami, nie zvlast: kus, ktory sa pripojil
+  // az po tom, co dosvietil, by inak cloudu nepovedal o tom cykle nic - a
+  // ukoncenie ziarenia poslane cez mrtvy link sa nikde neodklada.
+  JsonObject usage = body["usage"].to<JsonObject>();
+  this->core_->build_usage_summary(usage);
 }
 
 bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std::string &id,
