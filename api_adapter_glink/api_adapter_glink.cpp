@@ -153,6 +153,7 @@ void ApiAdapterGLink::setup() {
 }
 
 void ApiAdapterGLink::loop() {
+  if (this->ota_suspended_) return;
   this->history_poll_();
   if (!this->parsed_url_)
     return;
@@ -240,6 +241,23 @@ void ApiAdapterGLink::loop() {
     this->send_heartbeat_("full");
     this->last_full_heartbeat_ms_ = now;
   }
+}
+
+void ApiAdapterGLink::suspend_for_ota() {
+  this->ota_suspended_ = true;
+  // No large ending event here: release TCP buffers before Update.begin()
+  // reserves the ESP8266 flash writer buffer. OTA is already authenticated.
+  this->websocket_.disconnect();
+  this->started_ = this->connected_ = this->authenticated_ = false;
+  this->handshake_ = Handshake::NONE;
+  this->set_state_("ota_suspended");
+}
+
+void ApiAdapterGLink::resume_after_ota_error() {
+  if (!this->ota_suspended_) return;
+  this->ota_suspended_ = false;
+  this->next_connect_ms_ = millis() + 15000;
+  this->set_state_("waiting_retry");
 }
 
 void ApiAdapterGLink::dump_config() {
@@ -753,7 +771,11 @@ bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std:
   builder(payload);
 
   const bool ok = gsmart_glink::send_serialized(doc, [this](const char *data, size_t length) {
-    return this->websocket_.sendTXT(data, length);
+    const bool sent = this->websocket_.sendTXT(data, length);
+    // A short TCP write leaves an unfinished WebSocket frame. Appending later
+    // heartbeats to it corrupts the stream until the gateway's idle timeout.
+    if (!sent) this->websocket_.disconnect();
+    return sent;
   });
   this->last_tx_ms_ = millis();
   this->last_tx_type_ = type;

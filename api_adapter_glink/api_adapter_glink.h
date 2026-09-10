@@ -22,6 +22,8 @@ class ApiAdapterGLink : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+  void suspend_for_ota();
+  void resume_after_ota_error();
   float get_setup_priority() const override { return setup_priority::LATE; }
 
   void set_url(const std::string &url) { this->url_ = url; }
@@ -107,6 +109,7 @@ class ApiAdapterGLink : public Component {
   bool started_{false};
   bool connected_{false};
   bool authenticated_{false};
+  bool ota_suspended_{false};
   // Send outside the receive callback, after WebSockets has released its buffer.
   enum class Handshake : uint8_t { NONE, HELLO, AUTH, SESSION };
   Handshake handshake_{Handshake::NONE};
