@@ -462,10 +462,15 @@ void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payl
   JsonObject body;
   json_object_or_empty(payload, &empty_body_doc, &body);
 
-  JsonDocument response_doc;
-  JsonObject response = response_doc.to<JsonObject>();
-  std::string error = this->handle_gnode_command_(name, body, response);
-  this->send_response_(command_id, error.empty() ? "ok" : "error", response, error);
+  // Build directly in the outbound envelope. Copying a complete diagnostics
+  // document into a second document exhausts REX RAM even after auth is fixed.
+  std::string error = "not_executed";
+  this->send_frame_("response", "device", this->next_frame_id_("response"), [&](JsonObject out) {
+    out["commandId"] = command_id;
+    error = this->handle_gnode_command_(name, body, out["body"].to<JsonObject>());
+    out["status"] = error.empty() ? "ok" : "error";
+    if (!error.empty()) out["error"] = error;
+  });
   if (error.empty() && name == "g-node.control.restart.set") {
     this->send_session_event_("ending", "restart_requested", true);
   }
@@ -668,18 +673,6 @@ void ApiAdapterGLink::send_session_event_(const char *phase, const char *reason,
     if (include_status)
       this->build_full_status_(body);
   });
-}
-
-void ApiAdapterGLink::send_response_(const std::string &command_id, const char *status, JsonObject body,
-                                     const std::string &error) {
-  this->send_frame_("response", "device", this->next_frame_id_("response"),
-                    [command_id, status, body, error](JsonObject payload) {
-                      payload["commandId"] = command_id;
-                      payload["status"] = status;
-                      payload["body"].set(body);
-                      if (!error.empty())
-                        payload["error"] = error;
-                    });
 }
 
 void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source) {

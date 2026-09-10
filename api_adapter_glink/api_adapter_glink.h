@@ -52,7 +52,6 @@ class ApiAdapterGLink : public Component {
   bool send_auth_();
   void send_heartbeat_(const char *mode);
   void send_session_event_(const char *phase, const char *reason, bool include_status);
-  void send_response_(const std::string &command_id, const char *status, JsonObject body, const std::string &error = "");
   void send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source);
   bool send_firmware_event_(const char *phase, JsonObject body);
   bool send_frame_(const char *type, const char *peer, const std::string &id, std::function<void(JsonObject)> builder);
