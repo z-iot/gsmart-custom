@@ -117,6 +117,8 @@ class ApiAdapterGLink : public Component {
   gsmart_history::FlashFiles history_files_{};
 #ifdef ESP8266
   gsmart_history::Journal<3> history_{history_files_};
+#elif defined(GSMART_MODEL_PANEL)
+  gsmart_history::Journal<gsmart_history::PANEL_SLOTS> history_{history_files_};
 #else
   gsmart_history::Journal<64> history_{history_files_};
 #endif

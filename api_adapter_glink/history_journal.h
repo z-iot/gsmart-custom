@@ -9,6 +9,8 @@
 #include <cstring>
 
 namespace gsmart_history {
+// PANEL has a 64 KiB filesystem despite sharing ESP32 with 16 MiB emitters.
+inline constexpr size_t PANEL_SLOTS=6;
 enum Kind : uint8_t { BOOT=1, START, STOP, MODE, ACTION, ERROR_START, ERROR_CLEAR, GAP, CLOCK, CONFIG };
 #pragma pack(push,1)
 struct Record {
