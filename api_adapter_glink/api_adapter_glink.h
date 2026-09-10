@@ -43,13 +43,13 @@ class ApiAdapterGLink : public Component {
   bool probe_gateway_();
   bool parse_url_(ParsedUrl *parsed) const;
   void on_websocket_event_(WStype_t type, uint8_t *payload, size_t length);
-  void handle_text_(const std::string &text);
+  void handle_text_(const uint8_t *text, size_t length);
   void handle_challenge_(JsonObject payload);
   void handle_command_(const std::string &ref_id, JsonObject payload);
   std::string handle_gnode_command_(const std::string &name, JsonObject body, JsonObject response);
 
-  void send_hello_();
-  void send_auth_();
+  bool send_hello_();
+  bool send_auth_();
   void send_heartbeat_(const char *mode);
   void send_session_event_(const char *phase, const char *reason, bool include_status);
   void send_response_(const std::string &command_id, const char *status, JsonObject body, const std::string &error = "");
@@ -108,6 +108,9 @@ class ApiAdapterGLink : public Component {
   bool started_{false};
   bool connected_{false};
   bool authenticated_{false};
+  // Send outside the receive callback, after WebSockets has released its buffer.
+  enum class Handshake : uint8_t { NONE, HELLO, AUTH, SESSION };
+  Handshake handshake_{Handshake::NONE};
   bool last_probe_ok_{false};
   std::string state_{"init"};
   std::string last_error_{};

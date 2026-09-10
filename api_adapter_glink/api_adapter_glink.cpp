@@ -1,4 +1,5 @@
 #include "api_adapter_glink.h"
+#include "serialized_frame.h"
 
 #if defined(ESP32) || defined(ESP8266)
 
@@ -181,6 +182,29 @@ void ApiAdapterGLink::loop() {
   this->websocket_.loop();
   now = millis();
 
+  // RX JSON and the library's receive buffer are gone here. In particular, do
+  // not construct the full session inside the challenge/auth call stack on REX.
+  if (this->connected_ && this->handshake_ != Handshake::NONE) {
+    const auto step = this->handshake_;
+    this->handshake_ = Handshake::NONE;
+    if (step == Handshake::HELLO) {
+      if (!this->send_hello_()) this->stop_("hello_send_failed");
+    } else if (step == Handshake::AUTH) {
+      if (!this->send_auth_()) { this->stop_("auth_send_failed"); return; }
+      this->authenticated_ = true;
+      this->last_auth_ms_ = now;
+      this->set_state_("authenticated");
+      this->last_error_.clear();
+      this->handshake_ = Handshake::SESSION;
+    } else {
+      this->send_session_event_("started", "authenticated", true);
+      this->history_record_(gsmart_history::CLOCK, storage::store->global->radiation.activeMode);
+      this->history_report_errors_();
+      this->last_full_heartbeat_ms_ = millis();
+    }
+    return;
+  }
+
   if (this->event_level_expires_ms_ != 0 && static_cast<int32_t>(now - this->event_level_expires_ms_) >= 0) {
     this->event_level_ = "basic";
     this->event_level_expires_ms_ = 0;
@@ -288,6 +312,7 @@ void ApiAdapterGLink::stop_(const char *reason) {
   this->started_ = false;
   this->connected_ = false;
   this->authenticated_ = false;
+  this->handshake_ = Handshake::NONE;
   this->connect_started_ms_ = 0;
   this->next_connect_ms_ = millis() + this->reconnect_interval_ms_;
 }
@@ -359,11 +384,12 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->last_heartbeat_ms_ = millis();
       this->last_full_heartbeat_ms_ = millis();
       ESP_LOGI(TAG, "G-Link websocket connected");
-      this->send_hello_();
+      this->handshake_ = Handshake::HELLO;
       break;
     case WStype_DISCONNECTED:
       this->connected_ = false;
       this->authenticated_ = false;
+      this->handshake_ = Handshake::NONE;
       this->set_state_("websocket_disconnected");
       this->set_error_("websocket_disconnected");
       ESP_LOGW(TAG, "G-Link websocket disconnected");
@@ -372,7 +398,7 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->next_connect_ms_ = millis() + this->reconnect_interval_ms_;
       break;
     case WStype_TEXT:
-      this->handle_text_(std::string(reinterpret_cast<const char *>(payload), length));
+      this->handle_text_(payload, length);
       break;
     case WStype_ERROR:
       this->set_state_("websocket_error");
@@ -384,10 +410,10 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
   }
 }
 
-void ApiAdapterGLink::handle_text_(const std::string &text) {
+void ApiAdapterGLink::handle_text_(const uint8_t *text, size_t length) {
   this->last_rx_ms_ = millis();
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, text);
+  DeserializationError err = deserializeJson(doc, text, length);
   if (err) {
     this->set_error_("frame_decode_failed");
     ESP_LOGW(TAG, "Failed to decode G-Link frame: %s", err.c_str());
@@ -419,16 +445,7 @@ void ApiAdapterGLink::handle_challenge_(JsonObject payload) {
     ESP_LOGW(TAG, "Invalid G-Link challenge");
     return;
   }
-  this->send_auth_();
-  this->authenticated_ = true;
-  this->last_auth_ms_ = millis();
-  this->set_state_("authenticated");
-  this->last_error_.clear();
-  ESP_LOGI(TAG, "G-Link device auth sent, session=%s", this->session_id_.c_str());
-  this->send_session_event_("started", "authenticated", true);
-  this->history_record_(gsmart_history::CLOCK, storage::store->global->radiation.activeMode);
-  this->history_report_errors_();
-  this->last_full_heartbeat_ms_ = millis();
+  this->handshake_ = Handshake::AUTH;
 }
 
 void ApiAdapterGLink::handle_command_(const std::string &ref_id, JsonObject payload) {
@@ -597,8 +614,8 @@ std::string ApiAdapterGLink::handle_gnode_command_(const std::string &name, Json
   return "";
 }
 
-void ApiAdapterGLink::send_hello_() {
-  this->send_frame_("hello", "device", this->next_frame_id_("hello"), [this](JsonObject payload) {
+bool ApiAdapterGLink::send_hello_() {
+  return this->send_frame_("hello", "device", this->next_frame_id_("hello"), [this](JsonObject payload) {
     payload["serial"] = this->device_serial_();
     payload["mac"] = this->device_mac_();
     payload["model"] = this->device_model_();
@@ -609,12 +626,12 @@ void ApiAdapterGLink::send_hello_() {
   });
 }
 
-void ApiAdapterGLink::send_auth_() {
+bool ApiAdapterGLink::send_auth_() {
   const std::string input =
       this->device_serial_() + "|" + this->device_mac_() + "|" + this->client_nonce_ + "|" + this->server_nonce_ +
       "|" + this->session_id_;
   const std::string signature = this->hmac_sha256_hex_(this->derived_device_secret_(), input);
-  this->send_frame_("auth", "device", this->next_frame_id_("auth"), [this, signature](JsonObject payload) {
+  return this->send_frame_("auth", "device", this->next_frame_id_("auth"), [this, signature](JsonObject payload) {
     payload["keyId"] = this->device_mac_();
     payload["signature"] = signature;
   });
@@ -742,9 +759,9 @@ bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std:
   JsonObject payload = root["payload"].to<JsonObject>();
   builder(payload);
 
-  std::string out;
-  serializeJson(doc, out);
-  const bool ok = this->websocket_.sendTXT(out.c_str(), out.length());
+  const bool ok = gsmart_glink::send_serialized(doc, [this](const char *data, size_t length) {
+    return this->websocket_.sendTXT(data, length);
+  });
   this->last_tx_ms_ = millis();
   this->last_tx_type_ = type;
   if (!ok)
