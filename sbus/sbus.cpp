@@ -3,6 +3,7 @@
 #include "esphome/components/network/util.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/util.h"
+#include "esphome/components/storage/store.h"
 
 namespace esphome {
 namespace sbus {
@@ -11,7 +12,34 @@ static const char *const TAG = "sbus";
 
 
 void Sbus::setup() {
+  health_started_ms_=millis();
   this->set_interval("heartbeat", 15000, [this] { this->send_empty_command_(SbusCommandType::HEARTBEAT); });
+  this->set_interval("health", 1000, [this] { this->update_health_(); });
+}
+
+void Sbus::update_health_() {
+  if(!storage::store)return;
+  const auto now=millis();
+  if(health_frame_seen_||uint32_t(now-health_started_ms_)>=60000)
+    storage::store->setOperationalError(1,!health_frame_seen_||uint32_t(now-health_last_frame_ms_)>=60000,"SBUS communication unavailable");
+#ifdef GSMART_MODEL_SIBRA
+  for(size_t i=0;i<2;i++){
+    auto &fan=fan_health_[i];if(!fan.pwm_seen)continue;
+    if(!fan.pwm){
+      storage::store->setOperationalError(2+i,false,"Fan stopped unexpectedly");
+      storage::store->setOperationalError(4+i,false,"Fan RPM telemetry unavailable");
+      fan.zero_seen=false;continue;
+    }
+    const bool stale=uint32_t(now-(fan.rpm_seen?fan.rpm_ms:fan.power_ms))>=60000;
+    storage::store->setOperationalError(4+i,stale,"Fan RPM telemetry unavailable");
+    // Missing telemetry is uncertainty, never proof that a stalled fan recovered.
+    if(fan.rpm_seen&&uint32_t(now-fan.rpm_ms)<5000){
+      if(fan.rpm>0)storage::store->setOperationalError(2+i,false,"Fan stopped unexpectedly");
+      else if(fan.zero_seen&&uint32_t(now-fan.zero_ms)>=30000)
+        storage::store->setOperationalError(2+i,true,"Fan stopped unexpectedly");
+    }
+  }
+#endif
 }
 
 void Sbus::loop() {
@@ -89,6 +117,7 @@ bool Sbus::validate_message_() {
   }
 
   // valid message
+  health_last_frame_ms_=millis();health_frame_seen_=true;
   const uint8_t *message_data = data + 5;
   ESP_LOGV(TAG, "Received Sbus: CMD=0x%02X DATA=[%s] STATE=%u", command, 
            format_hex_pretty(message_data, length).c_str(), static_cast<uint8_t>(this->state_));
@@ -112,6 +141,7 @@ void Sbus::handle_command_(uint8_t command, const uint8_t *buffer, size_t len) {
 
   switch (command_type) {
     case SbusCommandType::HEARTBEAT:
+      if(len<1)return;
       ESP_LOGV(TAG, "MCU Heartbeat (0x%02X)", buffer[0]);
       if (buffer[0] == 0) {
         ESP_LOGI(TAG, "MCU restarted");
@@ -174,6 +204,26 @@ void Sbus::handle_datapoints_(const uint8_t *buffer, size_t len) {
         return;
     }
 
+#ifdef GSMART_MODEL_SIBRA
+    if(datapoint.type==SbusDatapointType::INTEGER){
+      const auto now=millis();
+      if(datapoint.id==101||datapoint.id==102){
+        auto &fan=fan_health_[datapoint.id-101];
+        if(!fan.pwm_seen||(!fan.pwm&&datapoint.value_uint)){
+          fan.power_ms=now;fan.zero_seen=false;fan.rpm_seen=false;
+        }
+        fan.pwm_seen=true;fan.pwm=datapoint.value_uint;
+      }
+      if(datapoint.id==103||datapoint.id==104){
+        auto &fan=fan_health_[datapoint.id-103];
+        if(fan.pwm_seen&&fan.pwm&&datapoint.value_uint==0){
+          if(!fan.zero_seen||uint32_t(now-fan.rpm_ms)>=5000)fan.zero_ms=now;
+          fan.zero_seen=true;
+        }else fan.zero_seen=false;
+        fan.rpm_seen=true;fan.rpm=datapoint.value_uint;fan.rpm_ms=now;
+      }
+    }
+#endif
     // Update internal datapoints
     bool found = false;
     for (auto &other : this->datapoints_) {

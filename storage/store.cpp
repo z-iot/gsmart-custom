@@ -128,9 +128,11 @@ namespace esphome
 
 #ifdef GSMART_FEATURE_FILESYSTEM
       if (file_system_ != nullptr) {
+#ifndef ESP8266
         ESP_LOGCONFIG(TAG, "Calling file_system_->setup()...");
         file_system_->setup();
         ESP_LOGCONFIG(TAG, "FileSystem ready: %s", file_system_->isReady() ? "YES" : "NO");
+#endif
       }
 #endif
 

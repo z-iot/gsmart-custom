@@ -567,7 +567,12 @@ namespace esphome
     {
       get_mac_address_raw(packet.mac);
       packet.region_id = this->currentRegionId();
-      sendMessage(false, PacketKind::CONTROL, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+#ifdef USE_STORAGE
+      if(storage::store)packet.cause=storage::store->getLastRadiationCause();
+#endif
+      sendMessage(false, PacketKind::CONTROL_AUDIT, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+      const PacketControlV2 legacy=packet;
+      sendMessage(false, PacketKind::CONTROL, reinterpret_cast<const uint8_t *>(&legacy), sizeof(legacy));
     }
 
     void UdpServer::sendStatus(PacketStatus packet)
@@ -610,7 +615,11 @@ namespace esphome
     {
       if (packet.region_id == 0)
         packet.region_id = this->currentRegionId();
-      sendMessage(false, PacketKind::REGION_INTENT, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+      sendMessage(false, PacketKind::REGION_INTENT_AUDIT, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+      PacketRegionIntentV2 legacy{};
+      memcpy(legacy.origin_mac,packet.origin_mac,6);legacy.region_id=packet.region_id;legacy.sequence=packet.sequence;
+      legacy.mode=packet.mode;legacy.source=packet.source;legacy.cause=packet.cause;
+      sendMessage(false, PacketKind::REGION_INTENT, reinterpret_cast<const uint8_t *>(&legacy), sizeof(legacy));
     }
 
     PacketStatus UdpServer::fillStatus()
@@ -1035,10 +1044,14 @@ namespace esphome
         }
         break;
       case PacketKind::CONTROL:
-        if (packet.body.size() == sizeof(PacketControl))
+      case PacketKind::CONTROL_AUDIT:
+        if ((packet.header.packetKind==PacketKind::CONTROL && packet.body.size()==sizeof(PacketControlV2)) ||
+            (packet.header.packetKind==PacketKind::CONTROL_AUDIT && packet.body.size()==sizeof(PacketControl)))
         {
-          auto *data = packet.body.data();
-          PacketControl *packetControl = reinterpret_cast<PacketControl *>(data);
+          PacketControl decoded{};
+          if(packet.header.packetKind==PacketKind::CONTROL_AUDIT)memcpy(&decoded,packet.body.data(),sizeof(decoded));
+          else memcpy(static_cast<PacketControlV2*>(&decoded),packet.body.data(),sizeof(PacketControlV2));
+          PacketControl *packetControl=&decoded;
           if (!this->regionControlAllowed(packetControl->region_id, packetControl->mac))
           {
             ESP_LOGD(TAG, "Ignoring Control: not from this region's master, or this device is not in its layout.");
@@ -1046,6 +1059,11 @@ namespace esphome
           }
           if (this->targetMacMatches(packetControl->mac))
             break;
+          const bool audited=packet.header.packetKind==PacketKind::CONTROL_AUDIT;
+          if(!audited&&audited_control_ms_&&uint32_t(millis()-audited_control_ms_)<1500&&
+             memcmp(audited_control_mac_,packetControl->mac,6)==0&&audited_control_mode_==packetControl->mode)break;
+          if(audited){memcpy(audited_control_mac_,packetControl->mac,6);audited_control_mode_=packetControl->mode;audited_control_ms_=millis();}
+          packetControl->cause.detail[23]=0;packetControl->cause.originSerial[15]=0;packetControl->cause.originModel[15]=0;packetControl->cause.actionId[23]=0;
           this->control_callback_.call(*packetControl);
         }
         break;
@@ -1142,10 +1160,19 @@ namespace esphome
         }
         break;
       case PacketKind::REGION_INTENT:
-        if (packet.body.size() == sizeof(PacketRegionIntent))
+      case PacketKind::REGION_INTENT_AUDIT:
+        if ((packet.header.packetKind==PacketKind::REGION_INTENT && packet.body.size()==sizeof(PacketRegionIntentV2)) ||
+            (packet.header.packetKind==PacketKind::REGION_INTENT_AUDIT && packet.body.size()==sizeof(PacketRegionIntent)))
         {
-          auto *data = packet.body.data();
-          PacketRegionIntent *packetRegionIntent = reinterpret_cast<PacketRegionIntent *>(data);
+          PacketRegionIntent decoded{};
+          if(packet.header.packetKind==PacketKind::REGION_INTENT_AUDIT)memcpy(&decoded,packet.body.data(),sizeof(decoded));
+          else {
+            PacketRegionIntentV2 legacy{};memcpy(&legacy,packet.body.data(),sizeof(legacy));
+            memcpy(decoded.origin_mac,legacy.origin_mac,6);decoded.region_id=legacy.region_id;decoded.sequence=legacy.sequence;
+            decoded.mode=legacy.mode;decoded.source=legacy.source;static_cast<storage::RadiationCauseV2&>(decoded.cause)=legacy.cause;
+          }
+          PacketRegionIntent *packetRegionIntent=&decoded;
+          decoded.cause.detail[23]=0;decoded.cause.originSerial[15]=0;decoded.cause.originModel[15]=0;decoded.cause.actionId[23]=0;
           if (!this->regionIntentAllowed(packetRegionIntent->region_id, packetRegionIntent->origin_mac))
           {
             ESP_LOGD(TAG, "Ignoring RegionIntent: origin is not a member of this region.");
@@ -1153,8 +1180,16 @@ namespace esphome
           }
           if (this->targetMacMatches(packetRegionIntent->origin_mac))
             break;
-          if (this->dedupeRegionIntent(*packetRegionIntent))
+          if (this->dedupeRegionIntent(*packetRegionIntent)) {
+#if defined(USE_STORAGE) && defined(GSMART_FEATURE_REGION)
+            // Legacy fallback may arrive first. Attach its later provenance
+            // without executing the same request again.
+            if(packet.header.packetKind==PacketKind::REGION_INTENT_AUDIT && storage::store &&
+               (storage::store->region->isMaster()||decoded.mode==storage::RadiationMode::OFF))
+              storage::store->observeRadiationAction(decoded.mode,decoded.cause);
+#endif
             break;
+          }
           this->region_intent_callback_.call(*packetRegionIntent);
         }
         break;

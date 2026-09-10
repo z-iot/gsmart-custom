@@ -76,7 +76,8 @@ void system_info_json(JsonObject root) {
   errors["count"] = error_state.totalCount;
   errors["lastCode"] = error_state.lastCode;
   errors["lastMessage"] = error_state.lastDesc;
-  errors["hasError"] = error_state.totalCount > 0;
+  errors["hasError"] = error_state.hasError();
+  errors["activeMask"] = error_state.activeMask;
 }
 
 void neighborhood_json(JsonObject root) {

@@ -6,6 +6,7 @@
 #include "esphome/components/api_core_v1/api_core_v1.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/storage/data_global.h"
+#include "history_files.h"
 
 #include <WebSocketsClient.h>
 #include <functional>
@@ -21,6 +22,7 @@ class ApiAdapterGLink : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::LATE; }
 
   void set_url(const std::string &url) { this->url_ = url; }
   void set_promoss_secret(const std::string &promoss_secret) { this->promoss_secret_ = promoss_secret; }
@@ -58,6 +60,13 @@ class ApiAdapterGLink : public Component {
   void build_diagnostics_(JsonObject root) const;
   void set_state_(const char *state);
   void set_error_(const char *error);
+  void history_setup_();
+  void history_poll_();
+  void history_send_();
+  void history_ack_(JsonObject body);
+  void history_report_error_(uint16_t code, bool active);
+  void history_report_errors_();
+  bool history_record_(uint8_t kind, storage::RadiationMode mode, uint16_t code = 0);
 
   std::string device_serial_() const;
   std::string device_mac_() const;
@@ -104,6 +113,23 @@ class ApiAdapterGLink : public Component {
   std::string last_error_{};
   std::string last_rx_type_{};
   std::string last_tx_type_{};
+#ifdef GSMART_FEATURE_FILESYSTEM
+  gsmart_history::FlashFiles history_files_{};
+#ifdef ESP8266
+  gsmart_history::Journal<3> history_{history_files_};
+#else
+  gsmart_history::Journal<64> history_{history_files_};
+#endif
+  uint64_t history_uptime_{0}, history_sent_boot_{0}, history_region_{0};
+  uint64_t history_wall_anchor_{0}, history_uptime_anchor_{0};
+  uint32_t history_millis_{0}, history_poll_ms_{0}, history_send_ms_{0}, history_sent_sequence_{0};
+  uint32_t history_window_ms_{0};
+  uint32_t history_day_ms_{0};
+  uint16_t history_day_records_{0};
+  uint16_t history_send_delay_{5000};
+  uint16_t history_version_{0}, history_window_records_{0};
+  bool history_clock_{false}, history_boot_{false}, history_config_{false}, history_rate_gap_{false};
+#endif
 };
 
 }  // namespace api_adapter_glink

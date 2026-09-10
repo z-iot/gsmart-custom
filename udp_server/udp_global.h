@@ -56,6 +56,8 @@ namespace esphome
       SITUATION = 56,
       REGION_LAYOUT = 57,
       REGION_INTENT = 58,
+      CONTROL_AUDIT = 59,
+      REGION_INTENT_AUDIT = 60,
     };
 
     std::string packetKindToStr(PacketKind item);
@@ -131,13 +133,14 @@ namespace esphome
       std::vector<uint8_t> body;
     };
 
-    struct PacketControl
+    struct PacketControlV2
     {
       uint8_t mac[6];
       uint64_t region_id;
       storage::RadiationMode mode;
       KindRadiationSource source;
     };
+    struct PacketControl : PacketControlV2 { storage::RadiationCause cause; };
 
     std::string packetControlToJsonStr(PacketControl packet);
 
@@ -276,6 +279,17 @@ namespace esphome
       KindRadiationSource source;
       storage::RadiationCause cause;
     };
+    struct PacketRegionIntentV2
+    {
+      uint8_t origin_mac[6]; uint64_t region_id; uint32_t sequence;
+      storage::RadiationMode mode; KindRadiationSource source;
+      storage::RadiationCauseV2 cause;
+    };
+    static_assert(sizeof(storage::RadiationCauseV2)==63,"Legacy cause wire shape changed");
+    static_assert(sizeof(PacketControlV2)==24,"Legacy control wire shape changed");
+    static_assert(sizeof(PacketRegionIntentV2)==96,"Legacy region intent wire shape changed");
+    static_assert(sizeof(PacketControl)==112,"Audited control wire shape changed");
+    static_assert(sizeof(PacketRegionIntent)==120,"Audited region intent wire shape changed");
 
     std::string packetRegionIntentToJsonStr(PacketRegionIntent packet);
 

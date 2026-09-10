@@ -70,6 +70,15 @@ namespace esphome
       SbusState state_ = SbusState::SBUS_STATE_UNKNOWN;
       uint32_t last_command_timestamp_ = 0;
       uint32_t last_rx_char_timestamp_ = 0;
+      uint32_t health_started_ms_{0}, health_last_frame_ms_{0};
+      bool health_frame_seen_{false};
+#ifdef GSMART_MODEL_SIBRA
+      struct FanHealth {
+        uint32_t pwm{0}, rpm{0}, rpm_ms{0}, power_ms{0}, zero_ms{0};
+        bool pwm_seen{false}, rpm_seen{false}, zero_seen{false};
+      } fan_health_[2];
+#endif
+      void update_health_();
       std::vector<SbusDatapointListener> listeners_;
       std::vector<SbusDatapoint> datapoints_;
       std::vector<uint8_t> rx_message_;

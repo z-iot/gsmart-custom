@@ -90,6 +90,31 @@ namespace esphome
         this->pending_radiation_cause_ = this->makeLocalRadiationCause_(kind, detail);
       }
 
+      void setRadiationActionId(const std::string &actionId) {
+        // Exact identity, never a user name supplied by an unauthenticated device API.
+        if (actionId.size() == 20 && actionId.substr(0,4) == "act_" &&
+            actionId.find_first_not_of("0123456789abcdef",4) == std::string::npos)
+          this->copyString_(pending_radiation_cause_.actionId, sizeof(pending_radiation_cause_.actionId), actionId);
+      }
+
+      void setOperationalError(uint16_t code, bool active, const std::string &description) {
+        if (code == 0 || code >= 32) return;
+        auto &errors = this->global->errors;
+        const uint32_t bit = 1U << code;
+        if (((errors.activeMask & bit) != 0) == active && (errors.observedMask & bit)) return;
+        errors.observedMask |= bit;
+        if (active) { errors.activeMask |= bit; errors.totalCount++; errors.lastCode = code; errors.lastDesc = description; }
+        else errors.activeMask &= ~bit;
+        this->operational_error_callback_.call(code, active);
+      }
+
+      void setEmitterOutput(bool active) {
+        auto &r = this->global->radiation;
+        if (r.outputKnown && r.outputActive == active) return;
+        r.outputKnown = true; r.outputActive = active;
+        this->emitter_output_callback_.call(active);
+      }
+
       void setRadiationCauseFromRemote(RadiationCause cause, RadiationCauseKind fallback_kind,
                                        const uint8_t origin_mac[6] = nullptr)
       {
@@ -103,6 +128,16 @@ namespace esphome
       }
 
       const RadiationCause &getLastRadiationCause() const { return this->global->radiation.lastCause; }
+      void observeRadiationAction(RadiationMode mode,const RadiationCause &cause) {
+        if (cause.actionId[0] == 0 || this->last_action_id_ == cause.actionId) return;
+        if (cause.kind != RadiationCauseKind::BUTTON && cause.kind != RadiationCauseKind::MOBILE_API &&
+            cause.kind != RadiationCauseKind::MQTT && cause.kind != RadiationCauseKind::CLOUD_USER &&
+            cause.kind != RadiationCauseKind::CLOUD_SERVICE) return;
+        const auto previous=this->global->radiation.lastCause;
+        this->global->radiation.lastCause=cause;this->last_action_id_=cause.actionId;
+        this->radiation_action_callback_.call(mode,cause);
+        this->global->radiation.lastCause=previous;
+      }
 
       bool isScheduleAuthority() const
       {
@@ -392,6 +427,16 @@ namespace esphome
       {
         SituationInfo &situation = this->global->situation;
         RadiationCause cause = this->consumeRadiationCause_(source);
+        this->global->radiation.lastCause = cause;
+        // Keep a no-op button press too, but dedupe a repeated UDP action.
+        if (cause.kind == RadiationCauseKind::BUTTON || cause.kind == RadiationCauseKind::MOBILE_API ||
+            cause.kind == RadiationCauseKind::MQTT || cause.kind == RadiationCauseKind::CLOUD_USER ||
+            cause.kind == RadiationCauseKind::CLOUD_SERVICE) {
+          if (cause.actionId[0] == 0 || this->last_action_id_ != cause.actionId) {
+            this->last_action_id_ = cause.actionId;
+            this->radiation_action_callback_.call(mode, cause);
+          }
+        }
         if (this->global->radiation.activeMode == mode)
         {
           this->global->radiation.lastCause = cause;
@@ -568,6 +613,9 @@ namespace esphome
       void add_on_situation_duration_change(std::function<void()> &&callback) { this->situation_duration_change_callback_.add(std::move(callback)); }
       void add_on_change_radiation_mode(std::function<void(RadiationMode)> &&callback) { this->change_radiation_mode_callback_.add(std::move(callback)); }
       void add_on_radiation_applied(std::function<void(RadiationMode, RadiationSource)> &&callback) { this->radiation_applied_callback_.add(std::move(callback)); }
+      void add_on_radiation_action(std::function<void(RadiationMode, RadiationCause)> &&callback) { this->radiation_action_callback_.add(std::move(callback)); }
+      void add_on_operational_error(std::function<void(uint16_t, bool)> &&callback) { this->operational_error_callback_.add(std::move(callback)); }
+      void add_on_emitter_output(std::function<void(bool)> &&callback) { this->emitter_output_callback_.add(std::move(callback)); }
 
 #ifdef GSMART_FEATURE_FILESYSTEM
       FileSystem *file_system_ = nullptr;
@@ -598,6 +646,10 @@ namespace esphome
       CallbackManager<void()> situation_duration_change_callback_{};
       CallbackManager<void(RadiationMode)> change_radiation_mode_callback_{};
       CallbackManager<void(RadiationMode, RadiationSource)> radiation_applied_callback_{};
+      CallbackManager<void(RadiationMode, RadiationCause)> radiation_action_callback_{};
+      CallbackManager<void(uint16_t, bool)> operational_error_callback_{};
+      CallbackManager<void(bool)> emitter_output_callback_{};
+      std::string last_action_id_{};
 
       static void copyString_(char *target, size_t target_size, const std::string &value)
       {
@@ -623,6 +675,7 @@ namespace esphome
         get_mac_address_raw(cause.originMac);
         this->copyString_(cause.originSerial, sizeof(cause.originSerial), this->get_serial());
         this->copyString_(cause.originModel, sizeof(cause.originModel), this->get_model());
+        snprintf(cause.actionId, sizeof(cause.actionId), "act_%08x%08x", random_uint32(), random_uint32());
         return cause;
       }
 
@@ -638,7 +691,7 @@ namespace esphome
           return this->makeLocalRadiationCause_(RadiationCauseKind::MOBILE_API, "mobile_api");
         case RadiationSource::INT:
         default:
-          return this->makeLocalRadiationCause_(RadiationCauseKind::BUTTON, "local");
+          return this->makeLocalRadiationCause_(RadiationCauseKind::UNKNOWN, "local-runtime");
         }
       }
 

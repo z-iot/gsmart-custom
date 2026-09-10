@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esphome/core/defines.h"
+
 #ifdef GSMART_FEATURE_FILESYSTEM
 
 #include "esphome/core/component.h"

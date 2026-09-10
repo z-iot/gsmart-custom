@@ -27,6 +27,8 @@ namespace esphome
       MQTT = 4,
       REGION_INTENT = 5,
       UDP_CONTROL = 6,
+      CLOUD_USER = 7,
+      CLOUD_SERVICE = 8,
     };
 
     inline const char *radiationCauseKindToApi(RadiationCauseKind kind)
@@ -45,6 +47,10 @@ namespace esphome
         return "region_intent";
       case RadiationCauseKind::UDP_CONTROL:
         return "udp_control";
+      case RadiationCauseKind::CLOUD_USER:
+        return "cloud_user";
+      case RadiationCauseKind::CLOUD_SERVICE:
+        return "cloud_service";
       default:
         return "unknown";
       }
@@ -66,13 +72,18 @@ namespace esphome
       }
     }
 
-    struct RadiationCause
+    // Preserve the exact v2 wire shape while extending the runtime cause.
+    struct RadiationCauseV2
     {
       RadiationCauseKind kind = RadiationCauseKind::UNKNOWN;
       char detail[24] = {0};
       uint8_t originMac[6] = {0, 0, 0, 0, 0, 0};
       char originSerial[16] = {0};
       char originModel[16] = {0};
+    };
+
+    struct RadiationCause : RadiationCauseV2 {
+      char actionId[24] = {0};
     };
 
     struct RadiationSettings
@@ -84,6 +95,8 @@ namespace esphome
       uint32_t lastStart = 0;
       uint32_t lastStop = 0;
       RadiationCause lastCause;
+      bool outputKnown = false;
+      bool outputActive = false;
     };
 
     struct ConSettings
@@ -100,12 +113,14 @@ namespace esphome
       uint32_t totalCount = 0;
       std::string lastDesc = "";
       uint16_t lastCode = 0;
+      uint32_t activeMask = 0;
+      uint32_t observedMask = 0;
+      bool hasError() const { return activeMask != 0; }
 
       void clear()
       {
         totalCount = 0;
-        lastDesc = "";
-        lastCode = 0;
+        if (!activeMask) { lastDesc = ""; lastCode = 0; }
       }
     };
 

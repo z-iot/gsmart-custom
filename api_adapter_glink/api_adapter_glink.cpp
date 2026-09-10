@@ -127,6 +127,7 @@ void ApiAdapterGLink::setup() {
   this->core_->set_glink_diagnostics_provider([this](JsonObject root) { this->build_diagnostics_(root); });
   this->core_->set_firmware_event_emitter(
       [this](const char *phase, JsonObject body) { return this->send_firmware_event_(phase, body); });
+  this->history_setup_();
 
   if (this->url_.empty() || this->promoss_secret_.empty()) {
     ESP_LOGE(TAG, "G-Link url and promoss_secret are required");
@@ -151,6 +152,7 @@ void ApiAdapterGLink::setup() {
 }
 
 void ApiAdapterGLink::loop() {
+  this->history_poll_();
   if (!this->parsed_url_)
     return;
 
@@ -200,6 +202,8 @@ void ApiAdapterGLink::loop() {
     this->last_full_heartbeat_ms_ = now;
     return;
   }
+
+  if (this->authenticated_) this->history_send_();
 
   if (this->authenticated_ && this->heartbeat_interval_ms_ > 0 &&
       now - this->last_heartbeat_ms_ >= this->heartbeat_interval_ms_) {
@@ -400,6 +404,8 @@ void ApiAdapterGLink::handle_text_(const std::string &text) {
     this->handle_challenge_(payload);
   } else if (strcmp(type, "command") == 0) {
     this->handle_command_(ref_id, payload);
+  } else if (strcmp(type, "event") == 0 && strcmp(payload["kind"] | "", "device.history.ack") == 0) {
+    this->history_ack_(payload["body"].as<JsonObject>());
   } else {
     ESP_LOGW(TAG, "Unsupported G-Link frame type: %s", type);
   }
@@ -420,6 +426,8 @@ void ApiAdapterGLink::handle_challenge_(JsonObject payload) {
   this->last_error_.clear();
   ESP_LOGI(TAG, "G-Link device auth sent, session=%s", this->session_id_.c_str());
   this->send_session_event_("started", "authenticated", true);
+  this->history_record_(gsmart_history::CLOCK, storage::store->global->radiation.activeMode);
+  this->history_report_errors_();
   this->last_full_heartbeat_ms_ = millis();
 }
 
@@ -655,6 +663,9 @@ void ApiAdapterGLink::send_response_(const std::string &command_id, const char *
 }
 
 void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage::RadiationSource source) {
+#ifndef GSMART_EMITTER
+  this->history_record_(mode == storage::RadiationMode::OFF ? gsmart_history::STOP : gsmart_history::START, mode);
+#endif
   if (!this->authenticated_)
     return;
 
@@ -668,6 +679,7 @@ void ApiAdapterGLink::send_radiation_event_(storage::RadiationMode mode, storage
     body["source"] = storage::radiationSourceToApi(source);
     body["serial"] = this->device_serial_();
     body["uptimeSec"] = millis() / 1000;
+    body["stateBasis"] = "requested_mode";
     // Odsvietene hodiny sa menia prave tu - inde stoja. Cloud si ich nema odkial
     // vypytat inak nez dotazom na kazdy kus zvlast, takze ich kus prilozi sam,
     // v okamihu, ked su cerstve. Pri zapnuti sa neposielaju: vtedy je to este
@@ -738,6 +750,12 @@ bool ApiAdapterGLink::send_frame_(const char *type, const char *peer, const std:
 }
 
 void ApiAdapterGLink::build_diagnostics_(JsonObject root) const {
+#ifdef GSMART_FEATURE_FILESYSTEM
+  auto history=root["history"].to<JsonObject>();
+  history["version"]=1;history["healthy"]=history_.healthy();history["pendingRecords"]=history_.pending();
+  history["capacityGap"]=history_.blocked();history["rateGap"]=history_rate_gap_;
+  history["droppedRecords"]=history_.dropped();history["repairedTail"]=history_.repaired_tail();
+#endif
   const uint32_t now = millis();
   root["enabled"] = this->parsed_url_;
   root["state"] = this->state_;

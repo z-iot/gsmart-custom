@@ -244,6 +244,8 @@ storage::RadiationCauseKind radiation_cause_from_request(JsonObject root) {
   std::string cause = normalize_token(json_string(root["causeKind"], json_string(root["transport"], "mobile_api")));
   if (cause == "mqtt")
     return storage::RadiationCauseKind::MQTT;
+  if (cause == "cloud_user") return storage::RadiationCauseKind::CLOUD_USER;
+  if (cause == "cloud_service") return storage::RadiationCauseKind::CLOUD_SERVICE;
   return storage::RadiationCauseKind::MOBILE_API;
 }
 
@@ -253,6 +255,7 @@ void set_radiation_request_cause(JsonObject root) {
   if (detail.empty())
     detail = storage::radiationCauseKindToApi(kind);
   storage::store->setRadiationCause(kind, detail);
+  storage::store->setRadiationActionId(json_string(root["actionId"]));
 }
 
 void add_wifi_runtime(JsonObject root) {
@@ -327,6 +330,9 @@ void add_region_runtime(JsonObject root) {
 
   root["mode"] = radiation_mode_to_api(active_mode);
   root["radiate"] = active_mode != storage::RadiationMode::OFF;
+#ifdef GSMART_EMITTER
+  if(storage::store->global->radiation.outputKnown) root["outputActive"] = storage::store->global->radiation.outputActive;
+#endif
   root["source"] = radiation_source_to_api(storage::store->global->radiation.lastSource);
   root["remainingSec"] = storage::store->getTimerDurationSec(time(nullptr));
   root["currentMode"] = radiation_mode_to_api(situation.CurrentMode);
@@ -387,7 +393,8 @@ void add_error_status(JsonObject root) {
   errors["count"] = error_state.totalCount;
   errors["lastCode"] = error_state.lastCode;
   errors["lastMessage"] = error_state.lastDesc;
-  errors["hasError"] = error_state.totalCount > 0;
+  errors["hasError"] = error_state.hasError();
+  errors["activeMask"] = error_state.activeMask;
 
   JsonArray warnings = root["warnings"].to<JsonArray>();
   if (storage::store->global->isGuardDurationOverflow()) {
@@ -395,7 +402,7 @@ void add_error_status(JsonObject root) {
     warning["code"] = "guard_duration_overflow";
     warning["message"] = "Radiation guard duration has been exceeded.";
   }
-  if (error_state.totalCount > 0) {
+  if (error_state.hasError()) {
     JsonObject warning = warnings.add<JsonObject>();
     warning["code"] = "device_error";
     warning["message"] = error_state.lastDesc;
@@ -488,6 +495,14 @@ void ApiCoreV1::build_info(JsonObject root) {
   JsonObject capabilities = root["capabilities"].to<JsonObject>();
   capabilities["control"] = true;
   capabilities["diagnostics"] = true;
+  capabilities["actionOrigin"] = true;
+  capabilities["errorIntervals"] = true;
+#ifdef GSMART_FEATURE_FILESYSTEM
+  capabilities["historyVersion"] = 1;
+#endif
+#ifdef GSMART_EMITTER
+  capabilities["outputState"] = true;
+#endif
   const uint8_t model_num = storage::store->get_model_num();
   capabilities["emitter"] = storage::isEmitterModel(model_num);
   capabilities["actuator"] = model_num == 51 || model_num == 52;
@@ -544,6 +559,7 @@ void ApiCoreV1::build_status(JsonObject root) {
   region["isMaster"] = storage::store->region->isMaster();
   region["regionId"] = storage::convertRegionSerialtoStr(storage::store->region->layout.serial);
   region["selfIndex"] = storage::store->region->selfIndex;
+  region["configVersion"] = storage::store->region->metadata.regionVersion;
   region["masterIndex"] = storage::store->region->layout.masterIndex;
   region["udpChannel"] = storage::store->region->activeRegionPort();
   add_region_runtime(region);

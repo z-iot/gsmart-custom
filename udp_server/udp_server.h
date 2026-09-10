@@ -189,6 +189,9 @@ namespace esphome
       bool wifi_connected_{false};
       uint32_t region_intent_sequence_{0};
       std::map<std::string, uint32_t> recent_region_intents_{};
+      uint8_t audited_control_mac_[6]{};
+      uint32_t audited_control_ms_{0};
+      storage::RadiationMode audited_control_mode_{storage::RadiationMode::OFF};
     };
 
     // template <typename... Ts>

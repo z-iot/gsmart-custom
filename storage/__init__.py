@@ -2,6 +2,8 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.core import CORE, coroutine_with_priority
 from esphome import automation
+from pathlib import Path
+from esphome.helpers import copy_file_if_changed
 from esphome.const import (
     CONF_ID,
     CONF_TRIGGER_ID,
@@ -65,6 +67,9 @@ CONFIG_SCHEMA = cv.All(
 
 @coroutine_with_priority(64.0)
 async def to_code(config):
+    if CORE.is_esp32:
+        from esphome.components import esp32
+        esp32.require_vfs_dir()
     if config[CONF_FILESYSTEM]:
         cg.add_define("GSMART_FEATURE_FILESYSTEM")
 
@@ -74,6 +79,12 @@ async def to_code(config):
             cg.add_library("SPIFFS", None)
         elif CORE.is_esp8266:
             cg.add_library("LittleFS", None)
+            if config[CONF_MODEL] == "rex":
+                # Reserve history without moving the existing EEPROM/RF sectors.
+                target = Path(CORE.relative_build_path("gsmart-rex-1m32.ld"))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                copy_file_if_changed(Path(__file__).with_name("gsmart-rex-1m32.ld"), target)
+                cg.add_platformio_option("board_build.ldscript", "gsmart-rex-1m32.ld")
 
     if config[CONF_MODEL] == "sibra":
         cg.add_define("GSMART_MODEL_SIBRA")
