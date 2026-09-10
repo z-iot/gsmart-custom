@@ -72,7 +72,7 @@ def add_websockets_library():
 
     A REX has to build the library without its TLS half or BearSSL eats 100 kB of a 1 MB flash for
     a wss:// path validate_ws_url() refuses anyway, and there is no way to ask the registry copy for
-    that. `components/websockets-override/` is the same 2.7.2 release with three marked hunks; its
+    that. `components/websockets-override/` is the same 2.7.2 release with documented Gsmart changes; its
     README carries the numbers. Keep both arms on the same version.
 
     The override lives in the firmware repository rather than in this submodule, so a checkout used

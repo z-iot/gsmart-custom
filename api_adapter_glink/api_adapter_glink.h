@@ -110,6 +110,9 @@ class ApiAdapterGLink : public Component {
   bool connected_{false};
   bool authenticated_{false};
   bool ota_suspended_{false};
+#ifdef ESP8266
+  JsonDocument pending_command_;
+#endif
   // Send outside the receive callback, after WebSockets has released its buffer.
   enum class Handshake : uint8_t { NONE, HELLO, AUTH, SESSION };
   Handshake handshake_{Handshake::NONE};

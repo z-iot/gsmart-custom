@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <utility>
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -206,6 +207,16 @@ void ApiAdapterGLink::loop() {
     return;
   }
 
+#ifdef ESP8266
+  if (this->authenticated_ && !this->pending_command_.isNull()) {
+    // Move ownership before executing: disconnect callbacks may clear the
+    // queue, but the active request must remain valid throughout its handler.
+    JsonDocument command(std::move(this->pending_command_));
+    this->handle_command_("", command["payload"].as<JsonObject>());
+    return;
+  }
+#endif
+
   if (this->event_level_expires_ms_ != 0 && static_cast<int32_t>(now - this->event_level_expires_ms_) >= 0) {
     this->event_level_ = "basic";
     this->event_level_expires_ms_ = 0;
@@ -250,6 +261,9 @@ void ApiAdapterGLink::suspend_for_ota() {
   this->websocket_.disconnect();
   this->started_ = this->connected_ = this->authenticated_ = false;
   this->handshake_ = Handshake::NONE;
+#ifdef ESP8266
+  this->pending_command_.clear();
+#endif
   this->set_state_("ota_suspended");
 }
 
@@ -408,6 +422,9 @@ void ApiAdapterGLink::on_websocket_event_(WStype_t type, uint8_t *payload, size_
       this->connected_ = false;
       this->authenticated_ = false;
       this->handshake_ = Handshake::NONE;
+#ifdef ESP8266
+      this->pending_command_.clear();
+#endif
       this->set_state_("websocket_disconnected");
       this->set_error_("websocket_disconnected");
       ESP_LOGW(TAG, "G-Link websocket disconnected");
@@ -447,7 +464,23 @@ void ApiAdapterGLink::handle_text_(const uint8_t *text, size_t length) {
   if (strcmp(type, "challenge") == 0) {
     this->handle_challenge_(payload);
   } else if (strcmp(type, "command") == 0) {
+#ifdef ESP8266
+    // Large replies must not nest below the WebSocket receive stack/buffer.
+    // Keep one bounded pending request; reject a burst explicitly, never drop
+    // a command silently or allocate an unbounded queue on this small MCU.
+    if (this->pending_command_.isNull()) {
+      this->pending_command_ = std::move(doc);
+    } else {
+      const std::string command_id = payload["commandId"].as<std::string>();
+      this->send_frame_("response", "device", next_frame_id_("response"), [&](JsonObject out) {
+        out["commandId"] = command_id;
+        out["status"] = "error";
+        out["error"] = "device_busy";
+      });
+    }
+#else
     this->handle_command_(ref_id, payload);
+#endif
   } else if (strcmp(type, "event") == 0 && strcmp(payload["kind"] | "", "device.history.ack") == 0) {
     this->history_ack_(payload["body"].as<JsonObject>());
   } else {
