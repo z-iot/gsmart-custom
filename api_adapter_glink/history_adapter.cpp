@@ -38,6 +38,8 @@ static const char *history_mode(storage::RadiationMode mode){
 void ApiAdapterGLink::history_setup_(){
 #ifdef GSMART_FEATURE_FILESYSTEM
 #ifdef ESP8266
+  ESP_LOGI("history", "Boot reset=%u heap=%u block=%u stack=%u; starting history",
+           ESP.getResetInfoPtr()->reason, ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getFreeContStack());
   // ESP8266 preferences are allocated by offset, not looked up by key. Append
   // the one-time migration marker only at LATE, after all pre-existing settings.
   // Allocating it in Store::setup would shift region and Wi-Fi preference slots.
@@ -46,10 +48,15 @@ void ApiAdapterGLink::history_setup_(){
     storage::store->settingsMode->loadFromFile();
     storage::store->settingsDevice->loadFromFile();
   }
+  ESP_LOGI("history", "Filesystem ready=%s heap=%u block=%u",
+           storage::fileSystem&&storage::fileSystem->isReady()?"yes":"no", ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
 #endif
   const auto random64=[](){return (uint64_t(random_uint32())<<32)|random_uint32();};
   history_millis_=millis();history_uptime_=history_millis_;
   const bool ready=history_.begin(random64(),random64());
+#ifdef ESP8266
+  ESP_LOGI("history", "Journal ready=%s heap=%u block=%u", ready?"yes":"no", ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
+#endif
   storage::store->setOperationalError(10,!ready,"Offline history storage unavailable");
   if(ready)history_boot_=history_record_(gsmart_history::BOOT,storage::store->global->radiation.activeMode);
   storage::store->add_on_radiation_action([this](storage::RadiationMode mode,storage::RadiationCause cause){

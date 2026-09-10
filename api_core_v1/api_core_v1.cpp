@@ -9,6 +9,7 @@
 #include "esphome/components/wifi/wifi_component.h"
 #ifdef ESP32
 #include <esp_wifi.h>
+#include <esp_system.h>
 #endif
 
 #include "esphome/components/gsmart_wifi_manager/gsmart_wifi_manager.h"
@@ -566,6 +567,26 @@ void ApiCoreV1::build_status(JsonObject root) {
 #endif
 }
 
+void ApiCoreV1::build_boot_diagnostics(JsonObject root) {
+  // Read reset registers on demand; this requires no extra writes to flash.
+  root["uptimeSec"] = millis() / 1000;
+#ifdef ESP8266
+  const auto *reset = ESP.getResetInfoPtr();
+  root["platform"] = "esp8266";
+  root["code"] = reset->reason;
+  root["reason"] = ESP.getResetReason();
+  if (reset->reason == REASON_EXCEPTION_RST) {
+    root["exceptionCause"] = reset->exccause;
+    root["exceptionPc"] = reset->epc1;
+    root["exceptionAddress"] = reset->excvaddr;
+  }
+  root["freeStack"] = ESP.getFreeContStack();
+#elif defined(ESP32)
+  root["platform"] = "esp32";
+  root["code"] = static_cast<uint32_t>(esp_reset_reason());
+#endif
+}
+
 void ApiCoreV1::build_diagnostics(JsonObject root) {
   const std::string build = this->get_build_code_();
   const std::string firmware_version = this->get_firmware_version_();
@@ -574,6 +595,7 @@ void ApiCoreV1::build_diagnostics(JsonObject root) {
   root["serial"] = storage::store->get_serial();
   root["uptimeSec"] = millis() / 1000;
   add_diagnostics_telemetry(root);
+  this->build_boot_diagnostics(root["boot"].to<JsonObject>());
 
   JsonObject memory = root["memory"].to<JsonObject>();
   memory["freeHeap"] = ESP.getFreeHeap();

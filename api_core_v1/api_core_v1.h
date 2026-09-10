@@ -64,6 +64,7 @@ class ApiCoreV1 : public Component {
   void build_info(JsonObject root);
   void build_status(JsonObject root);
   void build_diagnostics(JsonObject root);
+  void build_boot_diagnostics(JsonObject root);
   void set_glink_diagnostics_provider(std::function<void(JsonObject)> provider) {
     this->glink_diagnostics_provider_ = std::move(provider);
   }

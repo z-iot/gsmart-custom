@@ -645,6 +645,9 @@ void ApiAdapterGLink::send_session_event_(const char *phase, const char *reason,
     body["displayName"] = this->device_display_name_();
     body["uptimeSec"] = millis() / 1000;
     body["eventLevel"] = this->event_level_;
+    // Also report a failed/absent journal's boot: reconnect telemetry is
+    // independent of LittleFS, so storage faults cannot hide reset diagnostics.
+    if (!ending) this->core_->build_boot_diagnostics(body["boot"].to<JsonObject>());
     if (include_status)
       this->build_full_status_(body);
   });
